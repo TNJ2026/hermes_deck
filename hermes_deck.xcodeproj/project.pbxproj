@@ -1,0 +1,577 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 110;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		FA00000000000000000000A3 /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = FA00000000000000000000A2 /* Yams */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		EC2CBA9C2FD7F4D400EDF767 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EC2CBA842FD7F4D300EDF767 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EC2CBA8B2FD7F4D300EDF767;
+			remoteInfo = hermes_deck;
+		};
+		EC2CBAA62FD7F4D400EDF767 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EC2CBA842FD7F4D300EDF767 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EC2CBA8B2FD7F4D300EDF767;
+			remoteInfo = hermes_deck;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		EC2CBA8C2FD7F4D300EDF767 /* hermes_deck.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = hermes_deck.app; path = "Hermes Deck.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		EC2CBA9B2FD7F4D400EDF767 /* hermes_deckTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = hermes_deckTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		EC2CBAA52FD7F4D400EDF767 /* hermes_deckUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = hermes_deckUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		EC2CBA8E2FD7F4D300EDF767 /* hermes_deck */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = hermes_deck;
+			sourceTree = "<group>";
+		};
+		EC2CBA9E2FD7F4D400EDF767 /* hermes_deckTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = hermes_deckTests;
+			sourceTree = "<group>";
+		};
+		EC2CBAA82FD7F4D400EDF767 /* hermes_deckUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = hermes_deckUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		EC2CBA892FD7F4D300EDF767 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				FA00000000000000000000A3 /* Yams in Frameworks */,
+			);
+		};
+		EC2CBA982FD7F4D400EDF767 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+		EC2CBAA22FD7F4D400EDF767 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		EC2CBA832FD7F4D300EDF767 = {
+			isa = PBXGroup;
+			children = (
+				EC2CBA8E2FD7F4D300EDF767 /* hermes_deck */,
+				EC2CBA9E2FD7F4D400EDF767 /* hermes_deckTests */,
+				EC2CBAA82FD7F4D400EDF767 /* hermes_deckUITests */,
+				EC2CBA8D2FD7F4D300EDF767 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		EC2CBA8D2FD7F4D300EDF767 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				EC2CBA8C2FD7F4D300EDF767 /* hermes_deck.app */,
+				EC2CBA9B2FD7F4D400EDF767 /* hermes_deckTests.xctest */,
+				EC2CBAA52FD7F4D400EDF767 /* hermes_deckUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		EC2CBA8B2FD7F4D300EDF767 /* hermes_deck */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EC2CBAAD2FD7F4D400EDF767 /* Build configuration list for PBXNativeTarget "hermes_deck" */;
+			buildPhases = (
+				EC2CBA882FD7F4D300EDF767 /* Sources */,
+				EC2CBA892FD7F4D300EDF767 /* Frameworks */,
+				EC2CBA8A2FD7F4D300EDF767 /* Resources */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				EC2CBA8E2FD7F4D300EDF767 /* hermes_deck */,
+			);
+			name = hermes_deck;
+			packageProductDependencies = (
+				FA00000000000000000000A2 /* Yams */,
+			);
+			productName = hermes_deck;
+			productReference = EC2CBA8C2FD7F4D300EDF767 /* hermes_deck.app */;
+			productType = "com.apple.product-type.application";
+		};
+		EC2CBA9A2FD7F4D400EDF767 /* hermes_deckTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EC2CBAB02FD7F4D400EDF767 /* Build configuration list for PBXNativeTarget "hermes_deckTests" */;
+			buildPhases = (
+				EC2CBA972FD7F4D400EDF767 /* Sources */,
+				EC2CBA982FD7F4D400EDF767 /* Frameworks */,
+				EC2CBA992FD7F4D400EDF767 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EC2CBA9D2FD7F4D400EDF767 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				EC2CBA9E2FD7F4D400EDF767 /* hermes_deckTests */,
+			);
+			name = hermes_deckTests;
+			productName = hermes_deckTests;
+			productReference = EC2CBA9B2FD7F4D400EDF767 /* hermes_deckTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		EC2CBAA42FD7F4D400EDF767 /* hermes_deckUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EC2CBAB32FD7F4D400EDF767 /* Build configuration list for PBXNativeTarget "hermes_deckUITests" */;
+			buildPhases = (
+				EC2CBAA12FD7F4D400EDF767 /* Sources */,
+				EC2CBAA22FD7F4D400EDF767 /* Frameworks */,
+				EC2CBAA32FD7F4D400EDF767 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EC2CBAA72FD7F4D400EDF767 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				EC2CBAA82FD7F4D400EDF767 /* hermes_deckUITests */,
+			);
+			name = hermes_deckUITests;
+			productName = hermes_deckUITests;
+			productReference = EC2CBAA52FD7F4D400EDF767 /* hermes_deckUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		EC2CBA842FD7F4D300EDF767 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					EC2CBA8B2FD7F4D300EDF767 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					EC2CBA9A2FD7F4D400EDF767 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = EC2CBA8B2FD7F4D300EDF767;
+					};
+					EC2CBAA42FD7F4D400EDF767 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = EC2CBA8B2FD7F4D300EDF767;
+					};
+				};
+			};
+			buildConfigurationList = EC2CBA872FD7F4D300EDF767 /* Build configuration list for PBXProject "hermes_deck" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = EC2CBA832FD7F4D300EDF767;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				FA00000000000000000000A1 /* XCRemoteSwiftPackageReference "Yams" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = EC2CBA8D2FD7F4D300EDF767 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				EC2CBA8B2FD7F4D300EDF767 /* hermes_deck */,
+				EC2CBA9A2FD7F4D400EDF767 /* hermes_deckTests */,
+				EC2CBAA42FD7F4D400EDF767 /* hermes_deckUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		EC2CBA8A2FD7F4D300EDF767 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		EC2CBA992FD7F4D400EDF767 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		EC2CBAA32FD7F4D400EDF767 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		EC2CBA882FD7F4D300EDF767 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		EC2CBA972FD7F4D400EDF767 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		EC2CBAA12FD7F4D400EDF767 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		EC2CBA9D2FD7F4D400EDF767 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EC2CBA8B2FD7F4D300EDF767 /* hermes_deck */;
+			targetProxy = EC2CBA9C2FD7F4D400EDF767 /* PBXContainerItemProxy */;
+		};
+		EC2CBAA72FD7F4D400EDF767 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EC2CBA8B2FD7F4D300EDF767 /* hermes_deck */;
+			targetProxy = EC2CBAA62FD7F4D400EDF767 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		EC2CBAAB2FD7F4D400EDF767 /* Debug configuration for PBXProject "hermes_deck" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		EC2CBAAC2FD7F4D400EDF767 /* Release configuration for PBXProject "hermes_deck" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		EC2CBAAE2FD7F4D400EDF767 /* Debug configuration for PBXNativeTarget "hermes_deck" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Hermes Deck";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hermes Deck uses the microphone to record your voice for dictation.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermes Deck uses speech recognition to transcribe your dictation into text.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.tnj.deck;
+				PRODUCT_MODULE_NAME = hermes_deck;
+				PRODUCT_NAME = "Hermes Deck";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		EC2CBAAF2FD7F4D400EDF767 /* Release configuration for PBXNativeTarget "hermes_deck" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Hermes Deck";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Hermes Deck uses the microphone to record your voice for dictation.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Hermes Deck uses speech recognition to transcribe your dictation into text.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.tnj.deck;
+				PRODUCT_MODULE_NAME = hermes_deck;
+				PRODUCT_NAME = "Hermes Deck";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		EC2CBAB12FD7F4D400EDF767 /* Debug configuration for PBXNativeTarget "hermes_deckTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "ai.tnj.deck.hermes-deckTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Hermes Deck.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Hermes Deck";
+			};
+			name = Debug;
+		};
+		EC2CBAB22FD7F4D400EDF767 /* Release configuration for PBXNativeTarget "hermes_deckTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "ai.tnj.deck.hermes-deckTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Hermes Deck.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Hermes Deck";
+			};
+			name = Release;
+		};
+		EC2CBAB42FD7F4D400EDF767 /* Debug configuration for PBXNativeTarget "hermes_deckUITests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "ai.tnj.deck.hermes-deckUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = hermes_deck;
+			};
+			name = Debug;
+		};
+		EC2CBAB52FD7F4D400EDF767 /* Release configuration for PBXNativeTarget "hermes_deckUITests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "ai.tnj.deck.hermes-deckUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = hermes_deck;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		EC2CBA872FD7F4D300EDF767 /* Build configuration list for PBXProject "hermes_deck" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EC2CBAAB2FD7F4D400EDF767 /* Debug configuration for PBXProject "hermes_deck" */,
+				EC2CBAAC2FD7F4D400EDF767 /* Release configuration for PBXProject "hermes_deck" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		EC2CBAAD2FD7F4D400EDF767 /* Build configuration list for PBXNativeTarget "hermes_deck" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EC2CBAAE2FD7F4D400EDF767 /* Debug configuration for PBXNativeTarget "hermes_deck" */,
+				EC2CBAAF2FD7F4D400EDF767 /* Release configuration for PBXNativeTarget "hermes_deck" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		EC2CBAB02FD7F4D400EDF767 /* Build configuration list for PBXNativeTarget "hermes_deckTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EC2CBAB12FD7F4D400EDF767 /* Debug configuration for PBXNativeTarget "hermes_deckTests" */,
+				EC2CBAB22FD7F4D400EDF767 /* Release configuration for PBXNativeTarget "hermes_deckTests" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		EC2CBAB32FD7F4D400EDF767 /* Build configuration list for PBXNativeTarget "hermes_deckUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EC2CBAB42FD7F4D400EDF767 /* Debug configuration for PBXNativeTarget "hermes_deckUITests" */,
+				EC2CBAB52FD7F4D400EDF767 /* Release configuration for PBXNativeTarget "hermes_deckUITests" */,
+			);
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		FA00000000000000000000A1 /* XCRemoteSwiftPackageReference "Yams" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jpsim/Yams.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		FA00000000000000000000A2 /* Yams */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FA00000000000000000000A1 /* XCRemoteSwiftPackageReference "Yams" */;
+			productName = Yams;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = EC2CBA842FD7F4D300EDF767 /* Project object */;
+	validationLevel = 1;
+}

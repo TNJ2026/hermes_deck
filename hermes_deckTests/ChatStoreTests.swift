@@ -1,0 +1,2201 @@
+import Foundation
+import Testing
+@testable import hermes_deck
+
+@MainActor
+struct ChatStoreTests {
+    private func sourceFile(_ relativePath: String) throws -> String {
+        try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+
+    @Test
+    func chatLayoutStateHidesRightSidebarByDefaultAndTogglesVisibility() {
+        var layoutState = ChatLayoutState()
+
+        #expect(layoutState.isRightSidebarVisible == false)
+
+        layoutState.toggleRightSidebar()
+
+        #expect(layoutState.isRightSidebarVisible == true)
+    }
+
+    @Test
+    func rightSidebarViewIsRenderedOutsideContentVisibilityCondition() throws {
+        let source = try sourceFile("hermes_deck/Views/ContentView.swift")
+
+        #expect(!source.contains("if layoutState.isRightSidebarVisible {\n                    RightSidebarView("))
+    }
+
+    @Test
+    func rightPanelItemsUseRequestedIconOrder() throws {
+        let source = try sourceFile("hermes_deck/Views/Layout/RightSidebarView.swift")
+
+        #expect(source.contains("""
+enum RightPanelItem: String, CaseIterable, Identifiable {
+    case agents
+    case task
+    case kanban
+    case jobs
+    case claude
+    case codex
+    case gemini
+"""))
+    }
+
+    @Test
+    func jobsPanelHasOwnProfilePickerIncludingDefault() throws {
+        let rightSidebarSource = try sourceFile("hermes_deck/Views/Layout/RightSidebarView.swift")
+        let jobsSource = try sourceFile("hermes_deck/Views/Panels/AgentJobsPanelViews.swift")
+
+        #expect(rightSidebarSource.contains("@State private var selectedRightProfile: HermesProfile?"))
+        #expect(rightSidebarSource.contains("selectedAgentProfile: $selectedRightProfile"))
+        #expect(rightSidebarSource.contains("JobsPanelView(store: store)"))
+
+        let jobsPanelStart = try #require(jobsSource.range(of: "struct JobsPanelView: View")?.lowerBound)
+        let jobsPanelEnd = try #require(jobsSource[jobsPanelStart...].range(of: "struct ScheduledJobRow")?.lowerBound)
+        let jobsPanelSource = String(jobsSource[jobsPanelStart..<jobsPanelEnd])
+
+        #expect(jobsPanelSource.contains("@State private var selectedJobProfile: HermesProfile?"))
+        #expect(jobsPanelSource.contains("Picker(\"Profile\", selection: $selectedJobProfile)"))
+        #expect(jobsPanelSource.contains("ForEach(store.availableProfiles)"))
+        #expect(jobsPanelSource.contains("HermesProfile.defaultProfile.id"))
+        #expect(jobsPanelSource.contains(".task(id: selectedJobProfile?.id)"))
+        #expect(!jobsPanelSource.contains("store.agentProfiles"))
+    }
+
+    @Test
+    func agentProfilesExcludeDefaultProfile() {
+        let store = ChatStore(agentClient: StubHermesAgentClient(reply: "ok"))
+        store.availableProfiles = [
+            HermesProfile(id: "default", displayName: "Default"),
+            HermesProfile(id: "coding", displayName: "Coding"),
+            HermesProfile(id: "research", displayName: "Research"),
+        ]
+
+        #expect(store.agentProfiles.map(\.id) == ["coding", "research"])
+    }
+
+    @Test
+    func scheduledJobParserReadsCronJobs() throws {
+        let json = """
+        {
+          "jobs": [
+            {
+              "id": "job-2",
+              "name": "Later",
+              "schedule_display": "0 9 * * *",
+              "enabled": true,
+              "state": "scheduled",
+              "next_run_at": "2026-06-06T09:00:00+08:00",
+              "last_run_at": "2026-06-05T09:00:00+08:00",
+              "last_status": "ok",
+              "deliver": "local",
+              "skills": ["web-access"],
+              "profile": "researcher"
+            },
+            {
+              "id": "job-1",
+              "name": "Earlier",
+              "schedule_display": "0 8 * * *",
+              "enabled": false,
+              "state": "paused",
+              "next_run_at": "2026-06-06T08:00:00+08:00",
+              "last_status": "error",
+              "last_error": "timeout",
+              "script": "daily.sh"
+            }
+          ]
+        }
+        """
+
+        let jobs = try HermesScheduledJobParser.parse(Data(json.utf8))
+
+        #expect(jobs.map(\.id) == ["job-1", "job-2"])
+        #expect(jobs[0].name == "Earlier")
+        #expect(jobs[0].statusText == "paused")
+        #expect(jobs[0].lastError == "timeout")
+        #expect(jobs[0].script == "daily.sh")
+        #expect(jobs[1].skills == ["web-access"])
+    }
+
+    @Test
+    func loadingJobsUpdatesStoreStateForProfile() async throws {
+        let profile = HermesProfile(id: "researcher", displayName: "Researcher")
+        let provider = StubHermesJobProvider(jobs: [
+            HermesScheduledJob(
+                id: "job-1",
+                name: "Daily",
+                schedule: "0 8 * * *",
+                state: "scheduled",
+                enabled: true,
+                nextRunAt: nil,
+                lastRunAt: nil,
+                lastStatus: nil,
+                lastError: nil,
+                deliver: "local",
+                skills: [],
+                script: nil,
+                profile: "researcher"
+            ),
+        ])
+        let store = ChatStore(agentClient: StubHermesAgentClient(reply: "ok"), jobProvider: provider)
+
+        await store.loadJobs(for: profile)
+
+        if case .loaded(let jobs) = store.jobListState {
+            #expect(jobs.map(\.id) == ["job-1"])
+        } else {
+            Issue.record("Expected loaded jobs")
+        }
+        #expect(provider.requestedProfiles == ["researcher"])
+    }
+
+    @Test
+    func agentsPanelUsesFilteredAgentProfiles() throws {
+        let source = try sourceFile("hermes_deck/Views/Panels/AgentJobsPanelViews.swift")
+
+        #expect(source.contains("store.agentProfiles.first"))
+        #expect(source.contains("store.threadIDForAgentProfile(profile)"))
+    }
+
+    @Test
+    func agentsPanelEmbedsInlineChatDetailView() throws {
+        let agentsSource = try sourceFile("hermes_deck/Views/Panels/AgentJobsPanelViews.swift")
+        let composerChromeSource = try sourceFile("hermes_deck/Views/Chat/Composer/ComposerChrome.swift")
+
+        #expect(agentsSource.contains("ChatDetailView("))
+        #expect(agentsSource.contains("composerPresentation: .inline"))
+        #expect(agentsSource.contains("@State private var isComposerVisible = false"))
+        #expect(agentsSource.contains("showsComposer: showsComposer(for: threadID)"))
+        #expect(agentsSource.contains("isAgentThreadEmpty(threadID) || isComposerVisible"))
+        #expect(agentsSource.contains(".onHover"))
+        #expect(agentsSource.contains("isComposerVisible = $0"))
+        #expect(composerChromeSource.contains("func composerSurface(presentation: ComposerPresentation"))
+    }
+
+    @Test
+    func agentsPanelRendersHeaderPickerAndHidesComposer() throws {
+        let source = try sourceFile("hermes_deck/Views/ContentView.swift")
+        let agentsSource = try sourceFile("hermes_deck/Views/Panels/AgentJobsPanelViews.swift")
+
+        let toolbarStart = try #require(source.range(of: ".toolbar {")?.lowerBound)
+        let toolbarEnd = try #require(source[toolbarStart...].range(of: ".fileImporter(")?.lowerBound)
+        let toolbarSource = String(source[toolbarStart..<toolbarEnd])
+
+        #expect(!toolbarSource.contains("Picker(\"Profile\""))
+        #expect(agentsSource.contains("struct AgentsPanelView: View"))
+        #expect(agentsSource.contains("Text(\"Agents\")"))
+        #expect(agentsSource.contains("Picker(\"Profile\", selection: $selectedAgentProfile)"))
+        #expect(agentsSource.contains("selectableAgentProfiles"))
+        #expect(agentsSource.contains("ChatDetailView("))
+        #expect(agentsSource.contains("showsComposer: showsComposer(for: threadID)"))
+        #expect(!agentsSource.contains("struct AgentProfileRow: View"))
+        #expect(!agentsSource.contains("store.setProfile"))
+    }
+
+    @Test
+    func acpPanelsShowComposerForEmptyThreadsOrWhileHovered() throws {
+        let source = try sourceFile("hermes_deck/Views/Panels/ACPPanelView.swift")
+        let panelBodyStart = try #require(source.range(of: "struct AgentPanelBody: View")?.lowerBound)
+        let panelBodyEnd = try #require(source[panelBodyStart...].range(of: "struct ACPPanelView: View")?.lowerBound)
+        let panelBodySource = String(source[panelBodyStart..<panelBodyEnd])
+
+        #expect(panelBodySource.contains("@State private var isComposerVisible = false"))
+        #expect(panelBodySource.contains("if showsComposer"))
+        #expect(panelBodySource.contains("isEmpty || isComposerVisible"))
+        #expect(panelBodySource.contains("AgentPanelWelcomeView(sendBackend: sendBackend)"))
+        #expect(panelBodySource.contains("AgentComposerView("))
+        #expect(panelBodySource.contains(".onHover"))
+        #expect(panelBodySource.contains("isComposerVisible = $0"))
+    }
+
+    @Test
+    func acpPanelWelcomeMatchesHermesWelcomeWithAgentIconColors() throws {
+        let source = try sourceFile("hermes_deck/Views/Panels/ACPPanelView.swift")
+
+        #expect(source.contains("struct AgentPanelWelcomeView: View"))
+        #expect(source.contains("ExternalAgentAppearance.color(for: sendBackend)"))
+        #expect(source.contains("Image(iconName)"))
+        #expect(source.contains("Text(\"Start a new conversation\")"))
+        #expect(source.contains("Text(\"Ask a question or describe a task to get started.\")"))
+        #expect(source.contains("case .acp(.codex):"))
+        #expect(source.contains("\"Codex\""))
+        #expect(source.contains("\"Claude\""))
+        #expect(source.contains("\"Gemini\""))
+    }
+
+    @Test
+    func openingAgentProfileCreatesProfileThread() {
+        let store = ChatStore(agentClient: StubHermesAgentClient(reply: "ok"))
+        let profile = HermesProfile(id: "coding", displayName: "Coding")
+
+        store.openAgentProfile(profile)
+
+        #expect(store.selectedProfile.id == "coding")
+        #expect(store.selectedThread?.profile.id == "coding")
+        #expect(store.selectedThread?.title == "Coding")
+    }
+
+    @Test
+    func openingAgentProfileReusesExistingProfileThread() {
+        let profile = HermesProfile(id: "research", displayName: "Research")
+        let existingThread = ChatThread(title: "Existing Research", profile: profile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            threads: [existingThread]
+        )
+
+        store.openAgentProfile(profile)
+
+        #expect(store.selectedThreadID == existingThread.id)
+        #expect(store.threads.count == 1)
+    }
+
+    @Test
+    func threadIDForAgentProfileDoesNotChangeMainSelection() {
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            threads: [defaultThread]
+        )
+        let originalSelectedThreadID = store.selectedThreadID
+        let profile = HermesProfile(id: "coding", displayName: "Coding")
+
+        let agentThreadID = store.threadIDForAgentProfile(profile)
+
+        #expect(store.selectedThreadID == originalSelectedThreadID)
+        #expect(store.selectedProfile.id == "default")
+        #expect(store.thread(id: agentThreadID)?.profile.id == "coding")
+    }
+
+    @Test
+    func sendingToAgentThreadDoesNotMutateMainSelectedThread() async throws {
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "agent ok"),
+            threads: [defaultThread]
+        )
+        let originalSelectedThreadID = try #require(store.selectedThreadID)
+        let profile = HermesProfile(id: "coding", displayName: "Coding")
+        let agentThreadID = store.threadIDForAgentProfile(profile)
+
+        await store.send("hello agent", in: agentThreadID, profile: profile)
+
+        #expect(store.selectedThreadID == originalSelectedThreadID)
+        #expect(store.thread(id: originalSelectedThreadID)?.messages.isEmpty == true)
+        #expect(store.thread(id: agentThreadID)?.messages.map(\.role) == [.user, .assistant])
+        #expect(store.sendState == .idle)
+        #expect(store.sendState(forAgentThreadID: agentThreadID) == .idle)
+    }
+
+    @Test
+    func agentComposerAttachmentsAreSeparateFromMainComposer() async throws {
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "agent ok"),
+            threads: [defaultThread]
+        )
+        let profile = HermesProfile(id: "coding", displayName: "Coding")
+        let agentThreadID = store.threadIDForAgentProfile(profile)
+        let attachmentURL = URL(fileURLWithPath: "/tmp/agent-note.txt")
+
+        store.attach(urls: [attachmentURL], toAgentThreadID: agentThreadID)
+
+        #expect(store.pendingAttachments.isEmpty)
+        #expect(store.pendingAttachments(forAgentThreadID: agentThreadID).map(\.name) == ["agent-note.txt"])
+
+        await store.send("hello agent", in: agentThreadID, profile: profile)
+
+        #expect(store.pendingAttachments.isEmpty)
+        #expect(store.pendingAttachments(forAgentThreadID: agentThreadID).isEmpty)
+        #expect(store.thread(id: agentThreadID)?.messages.first?.attachments.map(\.name) == ["agent-note.txt"])
+    }
+
+    @Test
+    func agentPermissionRequestsAreSeparateFromMainComposer() async throws {
+        let client = StubStreamingHermesAgentClient(events: [
+            .approvalRequest(sessionID: "agent", requestID: nil, text: "Allow agent command?", options: [PermissionOption(id: "Yes", label: "Yes"), PermissionOption(id: "No", label: "No")]),
+            .messageComplete(sessionID: "agent", text: "Waiting", status: "complete", usage: nil),
+        ])
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(agentClient: client, threads: [defaultThread])
+        let profile = HermesProfile(id: "coding", displayName: "Coding")
+        let agentThreadID = store.threadIDForAgentProfile(profile)
+
+        await store.send("run agent command", in: agentThreadID, profile: profile)
+
+        #expect(store.pendingPermissionRequest == nil)
+        #expect(store.pendingPermissionRequest(forAgentThreadID: agentThreadID)?.message == "Allow agent command?")
+        #expect(store.pendingPermissionRequest(forAgentThreadID: agentThreadID)?.choices == ["Yes", "No"])
+    }
+
+    @Test
+    func agentSessionInfoIsSeparateFromMainComposer() async throws {
+        let client = StubStreamingHermesAgentClient(events: [
+            .sessionInfo(
+                sessionID: "agent",
+                info: HermesSessionInfo(model: "Agent Model", contextLength: 64000, usedTokens: 3200)
+            ),
+            .messageComplete(sessionID: "agent", text: "Ready", status: "complete", usage: nil),
+        ])
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(agentClient: client, threads: [defaultThread])
+        let profile = HermesProfile(id: "coding", displayName: "Coding")
+        let agentThreadID = store.threadIDForAgentProfile(profile)
+
+        await store.send("hi agent", in: agentThreadID, profile: profile)
+
+        #expect(store.sessionInfo.displayText == "Hermes")
+        #expect(store.sessionInfo(forAgentThreadID: agentThreadID).displayText == "Agent Model · 3.2K/64K")
+    }
+
+    @Test
+    func agentMentionParserMatchesProfileIDAndRemovesMention() throws {
+        let route = try #require(AgentMentionRouteParser.parse(
+            "Please check this @coding",
+            profiles: [HermesProfile(id: "coding", displayName: "Coding")]
+        ))
+
+        #expect(route.profile.id == "coding")
+        #expect(route.message == "Please check this")
+    }
+
+    @Test
+    func agentMentionParserMatchesDisplayNameCaseInsensitively() throws {
+        let route = try #require(AgentMentionRouteParser.parse(
+            "@Research Agent summarize this",
+            profiles: [HermesProfile(id: "researcher", displayName: "Research Agent")]
+        ))
+
+        #expect(route.profile.id == "researcher")
+        #expect(route.message == "summarize this")
+    }
+
+    @Test
+    func mainComposerMentionRoutesMessageToAgentAndReturnsResultToMainThread() async throws {
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "agent ok"),
+            threads: [defaultThread]
+        )
+        store.availableProfiles = [
+            HermesProfile(id: "default", displayName: "Default"),
+            HermesProfile(id: "coding", displayName: "Coding"),
+        ]
+        let originalSelectedThreadID = try #require(store.selectedThreadID)
+
+        await store.send("@coding inspect this")
+
+        if let routeRequest = store.latestAgentRouteRequest {
+            Issue.record("Expected no agent panel route request, got \(routeRequest)")
+        }
+        #expect(store.pendingExternalAgentPanel == nil)
+        #expect(store.selectedThreadID == originalSelectedThreadID)
+        #expect(store.thread(id: originalSelectedThreadID)?.messages.map(\.role) == [.user, .assistant])
+        #expect(store.thread(id: originalSelectedThreadID)?.messages.first?.content == "@coding inspect this")
+        #expect(store.thread(id: originalSelectedThreadID)?.messages.last?.content == "Coding:\n\nagent ok")
+        let codingThread = try #require(store.threads.first { $0.profile.id == "coding" })
+        #expect(codingThread.messages.first?.content == "inspect this")
+        #expect(codingThread.messages.first?.routedSourceProfileName == "Hermes agent")
+        #expect(codingThread.messages.map(\.role) == [.user, .assistant])
+    }
+
+    @Test
+    func forwardedHermesPromptIncludesSourceInRequestEnvelopeButKeepsThreadMessageClean() async throws {
+        let client = RecordingHermesAgentClient(reply: "agent ok")
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(agentClient: client, threads: [defaultThread])
+        store.availableProfiles = [
+            HermesProfile(id: "default", displayName: "Hermes agent"),
+            HermesProfile(id: "coding", displayName: "Coding"),
+        ]
+
+        await store.send("@coding inspect this")
+
+        if let routeRequest = store.latestAgentRouteRequest {
+            Issue.record("Expected no agent panel route request, got \(routeRequest)")
+        }
+        #expect(store.pendingExternalAgentPanel == nil)
+        let codingThread = try #require(store.threads.first { $0.profile.id == "coding" })
+        #expect(codingThread.messages.first?.content == "inspect this")
+
+        let request = try #require(await client.requests.last)
+        #expect(request.promptText.contains("[Forwarded from Hermes agent]"))
+        #expect(request.promptText.contains("inspect this"))
+        #expect(request.messages.last?.content == "inspect this")
+    }
+
+    @Test
+    func mainComposerMentionForwardsToExternalACPAgentAndEchoesReply() async throws {
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "codex ok"),
+            threads: [defaultThread]
+        )
+        let originalSelectedThreadID = try #require(store.selectedThreadID)
+
+        await store.send("@codex refactor this")
+
+        #expect(store.selectedThreadID == originalSelectedThreadID)
+        if let routeRequest = store.latestAgentRouteRequest {
+            Issue.record("Expected no agent panel route request, got \(routeRequest)")
+        }
+        #expect(store.pendingExternalAgentPanel == nil)
+        let mainMessages = try #require(store.thread(id: originalSelectedThreadID)?.messages)
+        #expect(mainMessages.map(\.role) == [.user, .assistant])
+        #expect(mainMessages.first?.content == "@codex refactor this")
+        #expect(mainMessages.last?.content == "Codex:\n\ncodex ok")
+
+        let codexThread = try #require(store.threads.first { $0.profile.id == "acp:codex" })
+        #expect(codexThread.messages.first?.content == "refactor this")
+        #expect(codexThread.messages.first?.routedSourceProfileName == "Hermes agent")
+        #expect(codexThread.messages.map(\.role) == [.user, .assistant])
+    }
+
+    @Test
+    func forwardedExternalPromptIncludesSourceAndAttachmentNotesInRequestEnvelope() async throws {
+        let client = RecordingHermesAgentClient(reply: "codex ok")
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(agentClient: client, threads: [defaultThread])
+        let attachment = Attachment(
+            name: "notes.txt",
+            url: URL(fileURLWithPath: "/tmp/notes.txt"),
+            contentType: "text/plain"
+        )
+        store.addAttachments([attachment])
+
+        await store.send("@codex refactor this")
+
+        let codexThread = try #require(store.threads.first { $0.profile.id == "acp:codex" })
+        #expect(codexThread.messages.first?.content == "refactor this")
+
+        let request = try #require(await client.requests.last)
+        #expect(request.backend == .acp(.codex))
+        #expect(request.promptText.contains("[Forwarded from Hermes agent]"))
+        #expect(request.promptText.contains("[User attached file: notes.txt (/tmp/notes.txt)]"))
+        #expect(request.promptText.contains("refactor this"))
+        #expect(request.attachments == [attachment])
+    }
+
+    @Test
+    func composerMentionDetectsActiveQueryAtWordBoundary() throws {
+        // No mention.
+        #expect(ComposerMention.activeQuery(in: "") == nil)
+        #expect(ComposerMention.activeQuery(in: "hello world") == nil)
+        // Mid-word @ is not a mention.
+        #expect(ComposerMention.activeQuery(in: "email a@b") == nil)
+        // A completed mention (trailing space) dismisses.
+        #expect(ComposerMention.activeQuery(in: "@codex ") == nil)
+
+        // Active mention at start; range covers @…end for replacement.
+        var bareDraft = "@co"
+        let bare = try #require(ComposerMention.activeQuery(in: bareDraft))
+        #expect(bare.query == "co")
+        bareDraft.replaceSubrange(bare.range, with: "@codex ")
+        #expect(bareDraft == "@codex ")
+
+        // Active mention after whitespace; query is lowercased.
+        var midDraft = "please ask @Cod"
+        let mid = try #require(ComposerMention.activeQuery(in: midDraft))
+        #expect(mid.query == "cod")
+        midDraft.replaceSubrange(mid.range, with: "@codex ")
+        #expect(midDraft == "please ask @codex ")
+    }
+
+    @Test
+    func externalAgentStreamingReplyIsEchoedBackToSourceThread() async throws {
+        // Streaming backends build the reply from deltas and end with an empty
+        // messageComplete; the echo must still capture the accumulated text.
+        let client = StubStreamingHermesAgentClient(events: [
+            .messageStart(sessionID: "codex"),
+            .messageDelta(sessionID: "codex", text: "hello "),
+            .messageDelta(sessionID: "codex", text: "world"),
+            .messageComplete(sessionID: "codex", text: "", status: "complete", usage: nil),
+        ])
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(agentClient: client, threads: [defaultThread])
+        let sourceID = try #require(store.selectedThreadID)
+
+        await store.send("@codex hi")
+
+        let mainMessages = try #require(store.thread(id: sourceID)?.messages)
+        #expect(mainMessages.map(\.role) == [.user, .assistant])
+        #expect(mainMessages.last?.content == "Codex:\n\nhello world")
+    }
+
+    @Test
+    func externalAgentSourceCannotRouteMentions() async throws {
+        let panelThread = ChatThread(
+            title: "Codex",
+            profile: HermesProfile(id: "acp:codex", displayName: "Codex")
+        )
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "should not route"),
+            threads: [panelThread]
+        )
+        store.availableProfiles = [
+            HermesProfile(id: "default", displayName: "Hermes agent"),
+            HermesProfile(id: "coding", displayName: "Coding"),
+        ]
+
+        let routed = await store.routePromptIfAllowed(
+            "@coding fix this",
+            from: .external(backend: .acp(.codex), displayName: "Codex"),
+            sourceThreadID: panelThread.id,
+            notifiesPanel: false
+        )
+
+        #expect(routed == .denied(.externalSourceCannotRoute))
+        if let routeRequest = store.latestAgentRouteRequest {
+            Issue.record("Expected no agent panel route request, got \(routeRequest)")        // panel not switched
+        }
+        #expect(store.pendingExternalAgentPanel == nil)
+        #expect(store.thread(id: panelThread.id)?.messages.isEmpty == true)
+        #expect(store.threads.first { $0.profile.id == "coding" } == nil)
+    }
+
+    @Test
+    func externalAgentNoReturnFlagSuppressesEchoAndIsStrippedFromForward() async throws {
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "codex ok"),
+            threads: [defaultThread]
+        )
+        let originalSelectedThreadID = try #require(store.selectedThreadID)
+
+        await store.send("@codex refactor this --no-return")
+
+        // Source thread keeps the user prompt but gets no echoed reply.
+        let mainMessages = try #require(store.thread(id: originalSelectedThreadID)?.messages)
+        #expect(mainMessages.map(\.role) == [.user])
+        #expect(mainMessages.first?.content == "@codex refactor this --no-return")
+
+        // Forwarded prompt is cleaned of the flag.
+        let codexThread = try #require(store.threads.first { $0.profile.id == "acp:codex" })
+        #expect(codexThread.messages.first?.content == "refactor this")
+    }
+
+    @Test
+    func misspelledNoReturenFlagSuppressesEchoAndIsStrippedFromForward() async throws {
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "codex ok"),
+            threads: [defaultThread]
+        )
+        let originalSelectedThreadID = try #require(store.selectedThreadID)
+
+        await store.send("@codex refactor this --no-returen")
+
+        let mainMessages = try #require(store.thread(id: originalSelectedThreadID)?.messages)
+        #expect(mainMessages.map(\.role) == [.user])
+
+        let codexThread = try #require(store.threads.first { $0.profile.id == "acp:codex" })
+        #expect(codexThread.messages.first?.content == "refactor this")
+    }
+
+    @Test
+    func externalAgentReplyAttributionParsesKnownSourcesOnly() throws {
+        #expect(ExternalAgentReplyAttribution.parse("Claude Code:\n\nDone")?.source == .claude)
+        #expect(ExternalAgentReplyAttribution.parse("Codex:\n\nDone")?.source == .codex)
+        #expect(ExternalAgentReplyAttribution.parse("Gemini (Antigravity):\n\nDone")?.source == .gemini)
+        #expect(ExternalAgentReplyAttribution.parse("Research Agent:\n\nDone") == nil)
+    }
+
+    @Test
+    func externalAgentReplySourceHeaderUsesAgentColors() throws {
+        let source = try sourceFile("hermes_deck/Views/Chat/Message/MessageBubble.swift")
+
+        #expect(source.contains("ExternalAgentReplyAttribution.parse(message.content)"))
+        #expect(source.contains("ExternalAgentReplyContent(attribution: attribution)"))
+        #expect(source.contains("ExternalAgentAppearance.color(for: attribution.source)"))
+        #expect(source.contains("Color(red: 217 / 255, green: 119 / 255, blue: 86 / 255)"))
+        #expect(source.contains("Color(red: 130 / 255, green: 163 / 255, blue: 255 / 255)"))
+        #expect(source.contains("Color(red: 150 / 255, green: 100 / 255, blue: 160 / 255)"))
+    }
+
+    @Test
+    func hermesAgentNoReturnFlagSuppressesEchoAndIsStrippedFromForward() async throws {
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "coding ok"),
+            threads: [defaultThread]
+        )
+        store.availableProfiles = [
+            HermesProfile(id: "default", displayName: "Hermes agent"),
+            HermesProfile(id: "coding", displayName: "Coding"),
+        ]
+        let originalSelectedThreadID = try #require(store.selectedThreadID)
+
+        await store.send("@coding inspect this --no-return")
+
+        let mainMessages = try #require(store.thread(id: originalSelectedThreadID)?.messages)
+        #expect(mainMessages.map(\.role) == [.user])
+        #expect(mainMessages.first?.content == "@coding inspect this --no-return")
+
+        let codingThread = try #require(store.threads.first { $0.profile.id == "coding" })
+        #expect(codingThread.messages.first?.content == "inspect this")
+    }
+
+    @Test
+    func toolMessageContentDisclosureCollapsesToOneLineByDefault() {
+        var disclosure = ToolMessageContentDisclosureState()
+
+        #expect(disclosure.isExpanded == false)
+        #expect(disclosure.lineLimit == 1)
+        #expect(disclosure.indicatorText == "▸")
+
+        disclosure.toggle()
+
+        #expect(disclosure.isExpanded == true)
+        #expect(disclosure.lineLimit == nil)
+        #expect(disclosure.indicatorText == "▾")
+    }
+
+    @Test
+    func historyTimestampFormatterUsesCompactChineseRelativeLabels() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 14, minute: 30)))
+
+        #expect(HistoryTimestampFormatter.displayText(for: try #require(calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 9, minute: 5))), now: now, calendar: calendar) == "09:05")
+        #expect(HistoryTimestampFormatter.displayText(for: try #require(calendar.date(from: DateComponents(year: 2026, month: 6, day: 2, hour: 22, minute: 0))), now: now, calendar: calendar) == "昨天")
+        #expect(HistoryTimestampFormatter.displayText(for: try #require(calendar.date(from: DateComponents(year: 2026, month: 5, day: 31))), now: now, calendar: calendar) == "3天前")
+        #expect(HistoryTimestampFormatter.displayText(for: try #require(calendar.date(from: DateComponents(year: 2026, month: 5, day: 13))), now: now, calendar: calendar) == "3周前")
+        #expect(HistoryTimestampFormatter.displayText(for: try #require(calendar.date(from: DateComponents(year: 2026, month: 3, day: 3))), now: now, calendar: calendar) == "3个月前")
+        #expect(HistoryTimestampFormatter.displayText(for: try #require(calendar.date(from: DateComponents(year: 2025, month: 6, day: 3))), now: now, calendar: calendar) == "去年")
+        #expect(HistoryTimestampFormatter.displayText(for: try #require(calendar.date(from: DateComponents(year: 2024, month: 6, day: 3))), now: now, calendar: calendar) == "前年")
+    }
+
+    @Test
+    func sessionDateGrouperSeparatesTodayYesterdayAndOlderMonths() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 14, minute: 30)))
+        let sessions = [
+            HermesSessionListItem(id: "today", title: "Today", lastActiveDate: try #require(calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 9, minute: 0)))),
+            HermesSessionListItem(id: "yesterday", title: "Yesterday", lastActiveDate: try #require(calendar.date(from: DateComponents(year: 2026, month: 6, day: 2, hour: 20, minute: 0)))),
+            HermesSessionListItem(id: "may", title: "May", lastActiveDate: try #require(calendar.date(from: DateComponents(year: 2026, month: 5, day: 31)))),
+            HermesSessionListItem(id: "april", title: "April", lastActiveDate: try #require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 12)))),
+        ]
+
+        let groups = SessionDateGrouper.groups(for: sessions, now: now, calendar: calendar)
+
+        #expect(groups.map(\.title) == ["今天", "昨天", "2026年5月", "2026年4月"])
+        #expect(groups.map { $0.sessions.map(\.id) } == [["today"], ["yesterday"], ["may"], ["april"]])
+    }
+
+    @Test
+    func sessionDateGrouperUsesOnlyMonthGroupsWhenTodayAndYesterdayAreEmpty() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 14, minute: 30)))
+        let sessions = [
+            HermesSessionListItem(id: "may", title: "May", lastActiveDate: try #require(calendar.date(from: DateComponents(year: 2026, month: 5, day: 31)))),
+            HermesSessionListItem(id: "april", title: "April", lastActiveDate: try #require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 12)))),
+        ]
+
+        let groups = SessionDateGrouper.groups(for: sessions, now: now, calendar: calendar)
+
+        #expect(groups.map(\.title) == ["2026年5月", "2026年4月"])
+    }
+
+    @Test
+    func sendingMessageCreatesUserAndAssistantMessages() async throws {
+        let client = StubHermesAgentClient(reply: "收到：Hello Hermes")
+        let store = ChatStore(agentClient: client)
+
+        await store.send("Hello Hermes")
+
+        #expect(store.selectedThread?.messages.map(\.role) == [.user, .assistant])
+        #expect(store.selectedThread?.messages.last?.content == "收到：Hello Hermes")
+    }
+
+    @Test
+    func streamingMessageDeltasUpdateSingleAssistantMessage() async throws {
+        let client = StubStreamingHermesAgentClient(events: [
+            .messageStart(sessionID: "s1"),
+            .messageDelta(sessionID: "s1", text: "Hello"),
+            .messageDelta(sessionID: "s1", text: " Hermes"),
+            .messageComplete(sessionID: "s1", text: "Hello Hermes", status: "complete", usage: nil),
+        ])
+        let store = ChatStore(agentClient: client)
+
+        await store.send("Hi")
+
+        #expect(store.selectedThread?.messages.map(\.role) == [.user, .assistant])
+        #expect(store.selectedThread?.messages.last?.content == "Hello Hermes")
+    }
+
+    @Test
+    func toolEventsAttachToAssistantMessage() async throws {
+        let client = StubStreamingHermesAgentClient(events: [
+            .toolStart(sessionID: "s1", tool: ToolCallEvent(toolID: "tool-1", name: "terminal", state: .running, context: "pwd")),
+            .toolComplete(sessionID: "s1", tool: ToolCallEvent(toolID: "tool-1", name: "terminal", state: .complete, summary: "/tmp", durationSeconds: 0.2)),
+            .messageComplete(sessionID: "s1", text: "Done", status: "complete", usage: nil),
+        ])
+        let store = ChatStore(agentClient: client)
+
+        await store.send("Run pwd")
+
+        let assistant = store.selectedThread?.messages.last
+        #expect(assistant?.role == .assistant)
+        #expect(assistant?.content == "Done")
+        #expect(assistant?.toolEvents.count == 1)
+        #expect(assistant?.toolEvents.first?.state == .complete)
+        #expect(assistant?.toolEvents.first?.context == "pwd")
+        #expect(assistant?.toolEvents.first?.summary == "/tmp")
+        #expect(assistant?.toolEvents.first?.durationSeconds == 0.2)
+    }
+
+    @Test
+    func toolEventsWithoutIDsMergeByActiveToolName() async throws {
+        let client = StubStreamingHermesAgentClient(events: [
+            .toolStart(sessionID: "s1", tool: ToolCallEvent(name: "terminal", state: .running, context: "ls")),
+            .toolComplete(sessionID: "s1", tool: ToolCallEvent(name: "terminal", state: .complete, summary: "README.md", durationSeconds: 0.4)),
+            .messageComplete(sessionID: "s1", text: "Done", status: "complete", usage: nil),
+        ])
+        let store = ChatStore(agentClient: client)
+
+        await store.send("List files")
+
+        let toolEvents = store.selectedThread?.messages.last?.toolEvents
+        #expect(toolEvents?.count == 1)
+        #expect(toolEvents?.first?.state == .complete)
+        #expect(toolEvents?.first?.context == "ls")
+        #expect(toolEvents?.first?.summary == "README.md")
+        #expect(toolEvents?.first?.durationSeconds == 0.4)
+    }
+
+    @Test
+    func clarifyRequestsAttachToAssistantMessage() async throws {
+        let client = StubStreamingHermesAgentClient(events: [
+            .clarifyRequest(sessionID: "s1", question: "Pick one", choices: ["A", "B"]),
+            .messageComplete(sessionID: "s1", text: "", status: "complete", usage: nil),
+        ])
+        let store = ChatStore(agentClient: client)
+
+        await store.send("Need a choice")
+
+        let assistant = store.selectedThread?.messages.last
+        #expect(assistant?.role == .assistant)
+        #expect(assistant?.clarifications.count == 1)
+        #expect(assistant?.clarifications.first?.question == "Pick one")
+        #expect(assistant?.clarifications.first?.choices == ["A", "B"])
+        #expect(store.pendingClarificationRequest?.question == "Pick one")
+        #expect(store.pendingClarificationRequest?.choices == ["A", "B"])
+        #expect(store.sendState == .idle)
+    }
+
+    @Test
+    func agentClarifyRequestsAreSeparateFromMainComposer() async throws {
+        let client = StubStreamingHermesAgentClient(events: [
+            .clarifyRequest(sessionID: "agent", question: "Need target?", choices: []),
+            .messageComplete(sessionID: "agent", text: "", status: "complete", usage: nil),
+        ])
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(agentClient: client, threads: [defaultThread])
+        let profile = HermesProfile(id: "coding", displayName: "Coding")
+        let agentThreadID = store.threadIDForAgentProfile(profile)
+
+        await store.send("ask", in: agentThreadID, profile: profile)
+
+        #expect(store.pendingClarificationRequest == nil)
+        #expect(store.pendingClarificationRequest(forAgentThreadID: agentThreadID)?.question == "Need target?")
+        #expect(store.pendingClarificationRequest(forAgentThreadID: agentThreadID)?.choices == [])
+    }
+
+    @Test
+    func clarificationBannerSupportsChoiceConfirmationAndFreeformInputs() throws {
+        let composerSource = try sourceFile("hermes_deck/Views/Chat/Composer/ComposerView.swift")
+        let bannersSource = try sourceFile("hermes_deck/Views/Chat/Composer/ComposerBanners.swift")
+        let jobsSource = try sourceFile("hermes_deck/Views/Panels/AgentJobsPanelViews.swift")
+
+        #expect(composerSource.contains("ClarificationRequestBanner("))
+        #expect(composerSource.contains("var clarificationRequest: ClarificationRequest?"))
+        #expect(bannersSource.contains("case confirmation"))
+        #expect(bannersSource.contains("case choice"))
+        #expect(bannersSource.contains("case freeform"))
+        #expect(bannersSource.contains("TextField(\"Type a reply...\""))
+        #expect(jobsSource.contains("Picker(\"Profile\", selection: $selectedJobProfile)"))
+    }
+
+    @Test
+    func clarifyRequestReleasesComposerSendState() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("hermes_deck/Models/Models.swift"),
+            encoding: .utf8
+        )
+
+        let clarifyCaseStart = try #require(source.range(of: "case .clarifyRequest")?.lowerBound)
+        let clarifyCaseEnd = try #require(source[clarifyCaseStart...].range(of: "case .thinkingDelta")?.lowerBound)
+        let clarifyCaseSource = String(source[clarifyCaseStart..<clarifyCaseEnd])
+
+        #expect(clarifyCaseSource.contains("showClarificationRequest"))
+        #expect(clarifyCaseSource.contains("setSendState(.idle, for: threadID, usesGlobalSendState: usesGlobalSendState)"))
+    }
+
+    @Test
+    func approvalRequestsAreExposedAboveComposer() async throws {
+        let client = StubStreamingHermesAgentClient(events: [
+            .approvalRequest(sessionID: "s1", requestID: "hermes:s1", text: "Allow shell command?", options: [PermissionOption(id: "session", label: "Allow this session"), PermissionOption(id: "deny", label: "Deny")]),
+            .messageComplete(sessionID: "s1", text: "Waiting", status: "complete", usage: nil),
+        ])
+        let store = ChatStore(agentClient: client)
+
+        await store.send("Run command")
+
+        #expect(store.pendingPermissionRequest?.message == "Allow shell command?")
+        #expect(store.pendingPermissionRequest?.choices == ["Allow this session", "Deny"])
+        #expect(store.pendingPermissionRequest?.isAnswerable == true)
+    }
+
+    @Test
+    func hermesApprovalAnswerIsSentBackToGateway() async throws {
+        let client = RecordingStreamingHermesAgentClient(events: [
+            .approvalRequest(sessionID: "s1", requestID: "hermes:s1", text: "Allow shell command?", options: [PermissionOption(id: "session", label: "Allow this session"), PermissionOption(id: "deny", label: "Deny")]),
+            .messageComplete(sessionID: "s1", text: "Waiting", status: "complete", usage: nil),
+        ])
+        let store = ChatStore(agentClient: client)
+
+        await store.send("Run command")
+        store.answerPermission(at: 0)
+        try await Task.sleep(for: .milliseconds(50))
+
+        let responses = await client.permissionResponses
+        #expect(responses.count == 1)
+        #expect(responses.first?.0 == "hermes:s1")
+        #expect(responses.first?.1 == "session")
+        #expect(store.pendingPermissionRequest == nil)
+    }
+
+    @Test
+    func dismissingHermesApprovalDeniesGatewayRequest() async throws {
+        let client = RecordingStreamingHermesAgentClient(events: [
+            .approvalRequest(sessionID: "s1", requestID: "hermes:s1", text: "Allow shell command?", options: [PermissionOption(id: "session", label: "Allow this session"), PermissionOption(id: "deny", label: "Deny")]),
+            .messageComplete(sessionID: "s1", text: "Waiting", status: "complete", usage: nil),
+        ])
+        let store = ChatStore(agentClient: client)
+
+        await store.send("Run command")
+        store.dismissPermissionRequest()
+        try await Task.sleep(for: .milliseconds(50))
+
+        let responses = await client.permissionResponses
+        #expect(responses.count == 1)
+        #expect(responses.first?.0 == "hermes:s1")
+        #expect(responses.first?.1 == "deny")
+        #expect(store.pendingPermissionRequest == nil)
+    }
+
+    @Test
+    func subagentEventsPopulateTaskPanelState() async throws {
+        let client = StubStreamingHermesAgentClient(events: [
+            .subagentStart(sessionID: "s1", progress: SubagentProgressEvent(
+                id: "sa-1",
+                parentID: nil,
+                taskIndex: 0,
+                taskCount: 1,
+                depth: 0,
+                goal: "Inspect implementation",
+                status: .running,
+                model: "Hermes",
+                toolName: nil,
+                text: nil,
+                summary: nil,
+                durationSeconds: nil,
+                toolCount: nil,
+                inputTokens: nil,
+                outputTokens: nil,
+                reasoningTokens: nil,
+                apiCalls: nil,
+                costUSD: nil,
+                filesRead: [],
+                filesWritten: [],
+                outputTail: []
+            )),
+            .subagentThinking(sessionID: "s1", progress: SubagentProgressEvent(
+                id: "sa-1",
+                parentID: nil,
+                taskIndex: 0,
+                taskCount: 1,
+                depth: 0,
+                goal: "Inspect implementation",
+                status: nil,
+                model: nil,
+                toolName: nil,
+                text: "Need to read the parser.",
+                summary: nil,
+                durationSeconds: nil,
+                toolCount: nil,
+                inputTokens: nil,
+                outputTokens: nil,
+                reasoningTokens: nil,
+                apiCalls: nil,
+                costUSD: nil,
+                filesRead: [],
+                filesWritten: [],
+                outputTail: []
+            )),
+            .subagentTool(sessionID: "s1", progress: SubagentProgressEvent(
+                id: "sa-1",
+                parentID: nil,
+                taskIndex: 0,
+                taskCount: 1,
+                depth: 0,
+                goal: "Inspect implementation",
+                status: nil,
+                model: nil,
+                toolName: "read_file",
+                text: "Models.swift",
+                summary: nil,
+                durationSeconds: nil,
+                toolCount: nil,
+                inputTokens: nil,
+                outputTokens: nil,
+                reasoningTokens: nil,
+                apiCalls: nil,
+                costUSD: nil,
+                filesRead: [],
+                filesWritten: [],
+                outputTail: []
+            )),
+            .subagentComplete(sessionID: "s1", progress: SubagentProgressEvent(
+                id: "sa-1",
+                parentID: nil,
+                taskIndex: 0,
+                taskCount: 1,
+                depth: 0,
+                goal: "Inspect implementation",
+                status: .completed,
+                model: nil,
+                toolName: nil,
+                text: nil,
+                summary: "Done",
+                durationSeconds: 1.2,
+                toolCount: 1,
+                inputTokens: 100,
+                outputTokens: 50,
+                reasoningTokens: nil,
+                apiCalls: 1,
+                costUSD: nil,
+                filesRead: ["Models.swift"],
+                filesWritten: [],
+                outputTail: [SubagentOutputTailItem(tool: "read_file", preview: "ok")]
+            )),
+            .messageComplete(sessionID: "s1", text: "Parent done", status: "complete", usage: nil),
+        ])
+        let store = ChatStore(agentClient: client)
+
+        await store.send("Use delegate_task")
+
+        let subagent = try #require(store.taskSubagents.first)
+        #expect(subagent.goal == "Inspect implementation")
+        #expect(subagent.status == .completed)
+        #expect(subagent.thinking == ["Need to read the parser."])
+        #expect(subagent.tools == ["read_file: Models.swift"])
+        #expect(subagent.summary == "Done")
+        #expect(subagent.durationSeconds == 1.2)
+        #expect(subagent.filesRead == ["Models.swift"])
+        #expect(subagent.outputTail.first?.preview == "ok")
+    }
+
+    @Test
+    func thinkingAndReasoningAttachBeforeFinalMessageContent() async throws {
+        let client = StubStreamingHermesAgentClient(events: [
+            .thinkingDelta(sessionID: "s1", text: "Checking "),
+            .thinkingDelta(sessionID: "s1", text: "state"),
+            .reasoningDelta(sessionID: "s1", text: "Need context"),
+            .messageDelta(sessionID: "s1", text: "Final"),
+            .messageComplete(sessionID: "s1", text: "Final answer", status: "complete", usage: nil),
+        ])
+        let store = ChatStore(agentClient: client)
+
+        await store.send("Explain")
+
+        let assistant = store.selectedThread?.messages.last
+        #expect(assistant?.thinkingText == "Checking state")
+        #expect(assistant?.reasoningText == "Need context")
+        #expect(assistant?.content == "Final answer")
+    }
+
+    @Test
+    func historySearchMatchesMessagesAndTitlesCaseInsensitively() {
+        let store = ChatStore(agentClient: StubHermesAgentClient(reply: "ok"))
+        store.createThread(title: "SwiftData Notes")
+        store.selectedThread?.messages.append(ChatMessage(role: .assistant, content: "Profile switching is ready."))
+
+        let titleMatches = store.filteredThreads(query: "swiftdata")
+        let bodyMatches = store.filteredThreads(query: "PROFILE")
+
+        #expect(titleMatches.count == 1)
+        #expect(bodyMatches.count == 1)
+    }
+
+    @Test
+    func sidebarHistoryOnlyIncludesThreadsAfterNewUserPrompt() async {
+        let provider = StubHermesSessionProvider(sessions: [
+            HermesSessionListItem(id: "hermes-session-1", title: "Loaded Session"),
+        ])
+        provider.loadedThreads["hermes-session-1"] = ChatThread(
+            title: "Loaded Session",
+            messages: [
+                ChatMessage(role: .user, content: "Old prompt"),
+                ChatMessage(role: .assistant, content: "Old answer"),
+            ]
+        )
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "New answer"),
+            sessionProvider: provider
+        )
+
+        #expect(store.historyThreads(query: "").isEmpty)
+
+        store.createThread()
+
+        #expect(store.historyThreads(query: "").isEmpty)
+
+        await store.loadSessionIntoChat(id: "hermes-session-1")
+
+        #expect(store.historyThreads(query: "").isEmpty)
+
+        await store.send("New prompt")
+
+        #expect(store.historyThreads(query: "").map(\.title) == ["Loaded Session"])
+        #expect(store.historyThreads(query: "new prompt").count == 1)
+    }
+
+    @Test
+    func loadingProfilesRefreshesAvailableProfiles() async {
+        let provider = StubHermesProfileProvider(profiles: [
+            HermesProfile(id: "default", displayName: "Default"),
+            HermesProfile(id: "developer", displayName: "developer"),
+            HermesProfile(id: "researcher", displayName: "researcher"),
+        ])
+        let store = ChatStore(agentClient: StubHermesAgentClient(reply: "ok"), profileProvider: provider)
+
+        await store.loadProfiles()
+
+        #expect(store.availableProfiles.map(\.id) == ["default", "developer", "researcher"])
+        #expect(store.selectedProfile.id == "default")
+    }
+
+    @Test
+    func modelConfigurationParserReadsConfiguredModels() {
+        let config = """
+        model:
+          provider: deepseek
+          default: deepseek-v4-flash
+          base_url: https://api.deepseek.com/v1
+
+        providers:
+          gemini:
+            model: gemini-2.5-flash
+            api_key: configured
+            base_url: https://generativelanguage.googleapis.com/v1beta/openai
+          ollama:
+            name: local-model
+            base_url: http://localhost:11434/v1
+            api_key: ''
+
+        fallback_providers: []
+
+        auxiliary:
+          vision:
+            provider: google
+            model: gemini-2.5-flash
+            api_key_env_var: GEMINI_API_KEY
+          web_extract:
+            provider: deepseek
+            model: deepseek-chat
+            api_key_env_var: DEEPSEEK_API_KEY
+          approval:
+            provider: auto
+            model: ''
+        """
+        let environment = """
+        DEEPSEEK_API_KEY=secret
+        GEMINI_API_KEY=secret
+        """
+
+        let models = HermesModelConfigurationParser.parse(config, environment: environment)
+
+        #expect(models.map(\.id) == [
+            "default",
+            "provider-gemini",
+            "provider-ollama",
+            "auxiliary-vision",
+            "auxiliary-web_extract",
+        ])
+        #expect(models.first?.provider == "deepseek")
+        #expect(models.first?.model == "deepseek-v4-flash")
+        #expect(models.first?.apiKeyStatus == "Configured via DEEPSEEK_API_KEY")
+        #expect(models.first { $0.id == "provider-gemini" }?.apiKeyStatus == "Configured")
+        #expect(models.first { $0.id == "provider-ollama" }?.apiKeyStatus == "No key required")
+        #expect(models.first { $0.id == "auxiliary-vision" }?.apiKeyStatus == "Configured via GEMINI_API_KEY")
+    }
+
+    @Test
+    func loadingConfiguredModelsUpdatesStoreState() async {
+        let provider = StubHermesModelConfigurationProvider(models: [
+            HermesConfiguredModel(
+                id: "default",
+                category: "Default",
+                title: "Default Model",
+                provider: "deepseek",
+                model: "deepseek-v4-flash",
+                apiKeyStatus: "Configured"
+            ),
+        ])
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            modelConfigurationProvider: provider
+        )
+
+        await store.loadConfiguredModels()
+
+        guard case .loaded(let models) = store.modelListState else {
+            Issue.record("Expected loaded model list state")
+            return
+        }
+        #expect(models.map(\.id) == ["default"])
+        #expect(models.first?.model == "deepseek-v4-flash")
+    }
+
+    @Test
+    func localPluginProviderReadsInstalledPluginManifests() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hermes-plugin-provider-\(UUID().uuidString)", isDirectory: true)
+        let configURL = root.appendingPathComponent("config.yaml")
+        let userPluginsURL = root.appendingPathComponent("plugins", isDirectory: true)
+        let bundledPluginsURL = root.appendingPathComponent("hermes-agent/plugins", isDirectory: true)
+        let gatewayDirectory = userPluginsURL.appendingPathComponent("gateway_chat", isDirectory: true)
+        let diskCleanupDirectory = bundledPluginsURL.appendingPathComponent("disk-cleanup", isDirectory: true)
+        let firecrawlDirectory = bundledPluginsURL
+            .appendingPathComponent("web", isDirectory: true)
+            .appendingPathComponent("firecrawl", isDirectory: true)
+        let unusedDirectory = bundledPluginsURL.appendingPathComponent("unused-plugin", isDirectory: true)
+
+        try FileManager.default.createDirectory(at: gatewayDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: diskCleanupDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: firecrawlDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: unusedDirectory, withIntermediateDirectories: true)
+
+        let config = """
+        plugins:
+          disabled:
+          - unused-plugin
+          enabled:
+          - disk-cleanup
+          - gateway_chat
+        """
+        let gatewayManifest = """
+        name: gateway_chat
+        version: 0.1.0
+        description: "Chat with child Hermes gateways through API server."
+        author: NousResearch
+        kind: backend
+        provides_tools:
+          - gateway_chat
+        """
+        let diskCleanupManifest = """
+        name: disk-cleanup
+        version: 2.0.0
+        description: "Auto-track and clean up ephemeral files created during Hermes sessions."
+        author: NousResearch
+        hooks:
+          - post_tool_call
+          - on_session_end
+        """
+        let firecrawlManifest = """
+        name: web-firecrawl
+        version: 1.0.0
+        description: "Firecrawl web search + content extraction."
+        author: NousResearch
+        kind: backend
+        provides_web_providers:
+          - firecrawl
+        """
+        let unusedManifest = """
+        name: unused-plugin
+        version: 1.0.0
+        description: "Disabled test plugin."
+        author: NousResearch
+        kind: backend
+        """
+
+        try config.write(to: configURL, atomically: true, encoding: .utf8)
+        try gatewayManifest.write(to: gatewayDirectory.appendingPathComponent("plugin.yaml"), atomically: true, encoding: .utf8)
+        try diskCleanupManifest.write(to: diskCleanupDirectory.appendingPathComponent("plugin.yaml"), atomically: true, encoding: .utf8)
+        try firecrawlManifest.write(to: firecrawlDirectory.appendingPathComponent("plugin.yaml"), atomically: true, encoding: .utf8)
+        try unusedManifest.write(to: unusedDirectory.appendingPathComponent("plugin.yaml"), atomically: true, encoding: .utf8)
+
+        let provider = LocalHermesPluginProvider(
+            configURL: configURL,
+            userPluginsURL: userPluginsURL,
+            bundledPluginsURL: bundledPluginsURL
+        )
+        let plugins = try await provider.installedPlugins()
+
+        #expect(plugins.map(\.name) == ["disk-cleanup", "gateway_chat", "unused-plugin", "web-firecrawl"])
+        let gateway = try #require(plugins.first { $0.name == "gateway_chat" })
+        let diskCleanup = try #require(plugins.first { $0.name == "disk-cleanup" })
+        let firecrawl = try #require(plugins.first { $0.name == "web-firecrawl" })
+        let unused = try #require(plugins.first { $0.name == "unused-plugin" })
+        #expect(gateway.source == "Local")
+        #expect(gateway.category == "backend")
+        #expect(gateway.status == "Enabled")
+        #expect(gateway.capabilities == ["gateway_chat"])
+        #expect(diskCleanup.source == "Bundled")
+        #expect(diskCleanup.capabilities == ["post_tool_call", "on_session_end"])
+        #expect(unused.status == "Disabled")
+        #expect(firecrawl.status == "Available")
+        #expect(firecrawl.capabilities == ["firecrawl"])
+    }
+
+    @Test
+    func hermesConfigurationFilePartiallyUpdatesScalarAndPreservesComments() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hermes-config-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let configURL = root.appendingPathComponent("config.yaml")
+        try """
+        # Hermes user configuration
+        model:
+          provider: deepseek
+          default: deepseek-chat # selected model
+
+        providers:
+          deepseek:
+            model: deepseek-chat
+            api_key_env_var: DEEPSEEK_API_KEY
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let config = HermesConfigurationFile(url: configURL)
+        try config.load()
+
+        #expect(try config.string(at: ["model", "default"]) == "deepseek-chat")
+
+        try config.setString("deepseek-v4-flash", at: ["model", "default"])
+        try config.save()
+
+        let updated = try String(contentsOf: configURL, encoding: .utf8)
+        #expect(updated.contains("# Hermes user configuration"))
+        #expect(updated.contains("default: deepseek-v4-flash # selected model"))
+        #expect(updated.contains("api_key_env_var: DEEPSEEK_API_KEY"))
+        #expect(!updated.contains("default: deepseek-chat # selected model"))
+    }
+
+    @Test
+    func hermesConfigurationFileUpdatesSequencesAndCanRemoveValues() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hermes-config-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let configURL = root.appendingPathComponent("config.yaml")
+        try """
+        plugins:
+          # disabled plugins stay visible to users
+          disabled:
+          - old-plugin
+          enabled:
+          - gateway_chat
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let config = HermesConfigurationFile(url: configURL)
+        try config.load()
+
+        #expect(try config.stringArray(at: ["plugins", "enabled"]) == ["gateway_chat"])
+
+        try config.setStringArray(["disk-cleanup", "gateway_chat"], at: ["plugins", "enabled"])
+        try config.removeValue(at: ["plugins", "disabled"])
+        try config.save()
+
+        let updated = try String(contentsOf: configURL, encoding: .utf8)
+        #expect(updated.contains("plugins:"))
+        #expect(updated.contains("# disabled plugins stay visible to users"))
+        #expect(updated.contains("enabled:\n  - disk-cleanup\n  - gateway_chat"))
+        #expect(!updated.contains("disabled:"))
+        #expect(!updated.contains("old-plugin"))
+    }
+
+    @Test
+    func hermesToolListParserReadsToolsSortedByName() {
+        let output = """
+        Failed to parse /Users/test/.hermes/config.yaml: ignored warning
+        Built-in toolsets (cli):
+          ✓ enabled  web  🔍 Web Search & Scraping
+          ✗ disabled  video  🎬 Video Analysis
+          ✓ enabled  browser  🌐 Browser Automation
+        """
+
+        let tools = HermesToolListParser.parse(Data(output.utf8))
+
+        #expect(tools.map(\.name) == ["browser", "video", "web"])
+        #expect(tools.first { $0.name == "browser" }?.source == "Built-in")
+        #expect(tools.first { $0.name == "browser" }?.status == "Enabled")
+        #expect(tools.first { $0.name == "browser" }?.summary == "🌐 Browser Automation")
+        #expect(tools.first { $0.name == "video" }?.status == "Disabled")
+    }
+
+    @Test
+    func settingInstalledPluginStatusUpdatesConfigLists() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hermes-plugin-config-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let configURL = root.appendingPathComponent("config.yaml")
+        try """
+        plugins:
+          enabled:
+          - browser
+          disabled:
+          - web-firecrawl
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let provider = LocalHermesPluginProvider(
+            configURL: configURL,
+            userPluginsURL: root.appendingPathComponent("plugins", isDirectory: true),
+            bundledPluginsURL: root.appendingPathComponent("bundled", isDirectory: true)
+        )
+
+        try await provider.setPlugin("web-firecrawl", enabled: true)
+
+        let config = HermesConfigurationFile(url: configURL)
+        try config.load()
+        #expect(try config.stringArray(at: ["plugins", "enabled"]) == ["browser", "web-firecrawl"])
+        #expect(try config.stringArray(at: ["plugins", "disabled"]) == [])
+    }
+
+    @Test
+    func loadingInstalledToolsUpdatesStoreState() async {
+        let provider = StubHermesPluginProvider(
+            plugins: [],
+            tools: [
+                HermesInstalledTool(
+                    id: "local-gateway-chat",
+                    name: "gateway_chat",
+                    source: "Local",
+                    status: "Enabled",
+                    summary: "Chat with child Hermes gateways"
+                ),
+            ]
+        )
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            pluginProvider: provider
+        )
+
+        await store.loadInstalledTools()
+
+        guard case .loaded(let tools) = store.toolListState else {
+            Issue.record("Expected loaded tool list state")
+            return
+        }
+        #expect(tools.map(\.name) == ["gateway_chat"])
+        #expect(tools.first?.summary == "Chat with child Hermes gateways")
+    }
+
+    @Test
+    func settingInstalledToolStatusUpdatesConfigLists() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hermes-tool-config-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let configURL = root.appendingPathComponent("config.yaml")
+        try """
+        tools:
+          # explicit tool selections
+          enabled:
+          - browser
+          disabled:
+          - web
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let provider = LocalHermesPluginProvider(
+            configURL: configURL,
+            userPluginsURL: root.appendingPathComponent("plugins", isDirectory: true),
+            bundledPluginsURL: root.appendingPathComponent("bundled", isDirectory: true)
+        )
+
+        try await provider.setTool("web", enabled: true)
+
+        let updated = try String(contentsOf: configURL, encoding: .utf8)
+        #expect(updated.contains("# explicit tool selections"))
+        #expect(updated.contains("enabled:\n  - browser\n  - web"))
+        #expect(updated.contains("disabled: []"))
+        let config = HermesConfigurationFile(url: configURL)
+        try config.load()
+        #expect(try config.stringArray(at: ["tools", "enabled"]) == ["browser", "web"])
+        #expect(try config.stringArray(at: ["tools", "disabled"]) == [])
+    }
+
+    @Test
+    func togglingToolStatusUpdatesProviderAndReloadsTools() async {
+        let provider = StubHermesPluginProvider(
+            plugins: [],
+            tools: [
+                HermesInstalledTool(
+                    id: "Built-in-web",
+                    name: "web",
+                    source: "Built-in",
+                    status: "Disabled",
+                    summary: "Web Search"
+                ),
+            ]
+        )
+        let store = ChatStore(agentClient: StubHermesAgentClient(reply: "ok"), pluginProvider: provider)
+
+        await store.loadInstalledTools()
+        await store.setTool(HermesInstalledTool(id: "Built-in-web", name: "web", status: "Disabled"), enabled: true)
+
+        guard case .loaded(let tools) = store.toolListState else {
+            Issue.record("Expected loaded tool list state")
+            return
+        }
+        #expect(provider.updatedTools.map(\.0) == ["web"])
+        #expect(provider.updatedTools.map(\.1) == [true])
+        #expect(tools.first?.status == "Enabled")
+    }
+
+    @Test
+    func hermesSkillListParserReadsTableRows() {
+        let output = """
+                                Installed Skills                                
+        ┏━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┓
+        ┃ Name         ┃ Category ┃ Source  ┃ Trust   ┃ Status  ┃
+        ┡━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━┩
+        │ dogfood      │          │ builtin │ builtin │ enabled │
+        │ apple-apps   │ apple    │ local   │ local   │ enabled │
+        └──────────────┴──────────┴─────────┴─────────┴─────────┘
+        1 builtin, 1 local — 2 enabled, 0 disabled
+        """
+
+        let skills = HermesSkillListParser.parse(Data(output.utf8))
+
+        #expect(skills.map(\.name) == ["dogfood", "apple-apps"])
+        #expect(skills.first?.source == "builtin")
+        #expect(skills.first?.status == "enabled")
+        #expect(skills.last?.category == "apple")
+    }
+
+    @Test
+    func loadingInstalledSkillsUpdatesStoreState() async {
+        let provider = StubHermesSkillProvider(skills: [
+            HermesInstalledSkill(
+                id: "dogfood",
+                name: "dogfood",
+                category: "",
+                source: "builtin",
+                trust: "builtin",
+                status: "enabled"
+            ),
+        ])
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            skillProvider: provider
+        )
+
+        await store.loadInstalledSkills()
+
+        guard case .loaded(let skills) = store.skillListState else {
+            Issue.record("Expected loaded skill list state")
+            return
+        }
+        #expect(skills.map(\.name) == ["dogfood"])
+        #expect(skills.first?.source == "builtin")
+    }
+
+    @Test
+    func settingInstalledSkillStatusUpdatesConfigLists() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hermes-skill-config-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let configURL = root.appendingPathComponent("config.yaml")
+        try """
+        skills:
+          enabled:
+          - dogfood
+          disabled:
+          - apple-apps
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let provider = LocalHermesSkillProvider(configURL: configURL)
+
+        try await provider.setSkill("apple-apps", enabled: true)
+
+        let config = HermesConfigurationFile(url: configURL)
+        try config.load()
+        #expect(try config.stringArray(at: ["skills", "enabled"]) == ["dogfood", "apple-apps"])
+        #expect(try config.stringArray(at: ["skills", "disabled"]) == [])
+    }
+
+    @Test
+    func togglingSkillStatusUpdatesProviderAndReloadsSkills() async {
+        let provider = StubHermesSkillProvider(skills: [
+            HermesInstalledSkill(
+                id: "apple-apps",
+                name: "apple-apps",
+                category: "apple",
+                source: "local",
+                trust: "local",
+                status: "disabled"
+            ),
+        ])
+        let store = ChatStore(agentClient: StubHermesAgentClient(reply: "ok"), skillProvider: provider)
+
+        await store.loadInstalledSkills()
+        await store.setSkill(provider.skills[0], enabled: true)
+
+        guard case .loaded(let skills) = store.skillListState else {
+            Issue.record("Expected loaded skill list state")
+            return
+        }
+        #expect(provider.updatedSkills.map(\.0) == ["apple-apps"])
+        #expect(provider.updatedSkills.map(\.1) == [true])
+        #expect(skills.first?.status == "enabled")
+    }
+
+    @Test
+    func sessionListParserReadsHermesSessionsTableOutput() {
+        let output = """
+        Title                            Preview                                  Last Active   ID
+        ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+        让researher搜索今日国际新闻               让researher搜索今日国际新闻                       39m ago       20260603_100649_818a5e
+        Initial Friendly Greeting and    hi                                       14h ago       20260602_204012_bd58d6
+        —                                你好                                       13h ago       20260602_205951_da3aa5
+        —                                                                         yesterday     20260602_115156_ca1982
+        """
+
+        let sessions = HermesSessionListParser.parse(Data(output.utf8))
+
+        #expect(sessions.count == 3)
+        let newsSession = sessions.first { $0.id == "20260603_100649_818a5e" }
+        let greetingSession = sessions.first { $0.id == "20260602_204012_bd58d6" }
+        let previewOnlySession = sessions.first { $0.id == "20260602_205951_da3aa5" }
+
+        #expect(newsSession?.title == "让researher搜索今日国际新闻")
+        #expect(newsSession?.preview == "让researher搜索今日国际新闻")
+        #expect(newsSession?.lastActive == "39m ago")
+        #expect(greetingSession?.title == "Initial Friendly Greeting and")
+        #expect(greetingSession?.preview == "hi")
+        #expect(previewOnlySession?.title == "你好")
+        #expect(previewOnlySession?.preview == "你好")
+        #expect(previewOnlySession?.lastActive == "13h ago")
+    }
+
+    @Test
+    func sessionDatabaseParserReadsSourceAndFiltersEmptyRows() {
+        let output = """
+        20260603_100649_818a5e\t让researher搜索今日国际新闻\ttui\t8\t让researher搜索今日国际新闻\t1780442809
+        20260602_205951_da3aa5\t—\tcli\t2\t你好\t1780395593
+        20260602_115156_ca1982\t—\ttui\t0\t\t1780362716
+        """
+
+        let sessions = HermesSessionDatabaseParser.parse(Data(output.utf8))
+
+        #expect(sessions.count == 2)
+        #expect(sessions[0].id == "20260603_100649_818a5e")
+        #expect(sessions[0].source == "tui")
+        #expect(sessions[0].messageCount == 8)
+        #expect(sessions[1].title == "你好")
+        #expect(sessions[1].source == "cli")
+        #expect(sessions[1].messageCount == 2)
+    }
+
+    @Test
+    func loadingSessionsRefreshesSessionListState() async {
+        let provider = StubHermesSessionProvider(sessions: [
+            HermesSessionListItem(
+                id: "20260603_100649_818a5e",
+                title: "Research news",
+                preview: "Search today's news",
+                source: "tui",
+                messageCount: 4,
+                lastActive: "39m ago"
+            ),
+        ])
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            sessionProvider: provider
+        )
+
+        await store.loadSessions()
+
+        #expect(store.sessionListState.sessions.map(\.id) == ["20260603_100649_818a5e"])
+        #expect(provider.requests == [SessionPageRequest(limit: 100, offset: 0)])
+        #expect(store.canLoadMoreSessions == false)
+    }
+
+    @Test
+    func loadingMoreSessionsAppendsNextPage() async {
+        let provider = StubHermesSessionProvider(pages: [
+            [
+                HermesSessionListItem(id: "session-1", title: "First"),
+                HermesSessionListItem(id: "session-2", title: "Second"),
+            ],
+            [
+                HermesSessionListItem(id: "session-3", title: "Third"),
+            ],
+        ])
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            sessionProvider: provider,
+            sessionPageSize: 2
+        )
+
+        await store.loadSessions()
+        await store.loadMoreSessions()
+
+        #expect(provider.requests == [
+            SessionPageRequest(limit: 2, offset: 0),
+            SessionPageRequest(limit: 2, offset: 2),
+        ])
+        #expect(store.sessionListState.sessions.map(\.id) == ["session-1", "session-2", "session-3"])
+        #expect(store.canLoadMoreSessions == false)
+    }
+
+    @Test
+    func deletingSessionAsksProviderToDeleteAndRefreshesSessions() async {
+        let provider = StubHermesSessionProvider(sessions: [
+            HermesSessionListItem(id: "session-1", title: "First", source: "tui", messageCount: 2),
+            HermesSessionListItem(id: "session-2", title: "Second", source: "cli", messageCount: 1),
+        ])
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            sessionProvider: provider
+        )
+
+        await store.loadSessions()
+        await store.deleteSession(id: "session-1")
+
+        #expect(provider.deletedIDs == ["session-1"])
+        #expect(store.sessionListState.sessions.map(\.id) == ["session-2"])
+    }
+
+    @Test
+    func deletingSessionAlsoRemovesItFromSidebarHistory() async {
+        let provider = StubHermesSessionProvider(sessions: [
+            HermesSessionListItem(id: "session-1", title: "First"),
+            HermesSessionListItem(id: "session-2", title: "Second"),
+        ])
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            sessionProvider: provider
+        )
+
+        await store.loadSessions()
+        await store.loadHistorySessions()
+        #expect(store.historySessions.map(\.id) == ["session-1", "session-2"])
+
+        await store.deleteSession(id: "session-1")
+
+        #expect(store.historySessions.map(\.id) == ["session-2"])
+    }
+
+    @Test
+    func isRespondingTracksMainAndAgentSendStates() {
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            sessionProvider: StubHermesSessionProvider(sessions: [])
+        )
+
+        #expect(store.isResponding == false)
+
+        store.sendState = .sending
+        #expect(store.isResponding == true)
+
+        store.sendState = .idle
+        store.agentSendStates[UUID()] = .sending
+        #expect(store.isResponding == true)
+
+        store.agentSendStates = [:]
+        #expect(store.isResponding == false)
+    }
+
+    @Test
+    func deletingSessionDoesNotResetLoadedCountToPageSize() async {
+        let provider = StubHermesSessionProvider(sessions: [
+            HermesSessionListItem(id: "session-1", title: "First"),
+            HermesSessionListItem(id: "session-2", title: "Second"),
+            HermesSessionListItem(id: "session-3", title: "Third"),
+            HermesSessionListItem(id: "session-4", title: "Fourth"),
+            HermesSessionListItem(id: "session-5", title: "Fifth"),
+        ])
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            sessionProvider: provider,
+            sessionPageSize: 2
+        )
+
+        await store.loadSessions()
+        #expect(store.sessionListState.sessions.map(\.id) == ["session-1", "session-2"])
+
+        await store.loadMoreSessions()
+        #expect(store.sessionListState.sessions.map(\.id) == ["session-1", "session-2", "session-3", "session-4"])
+
+        await store.deleteSession(id: "session-2")
+
+        #expect(store.sessionListState.sessions.map(\.id) == ["session-1", "session-3", "session-4", "session-5"])
+    }
+
+    @Test
+    func loadingSessionIntoChatSelectsThreadFromProvider() async {
+        let provider = StubHermesSessionProvider(sessions: [
+            HermesSessionListItem(id: "hermes-session-1", title: "Loaded Session"),
+        ])
+        provider.loadedThreads["hermes-session-1"] = ChatThread(
+            title: "Loaded Session",
+            messages: [
+                ChatMessage(role: .user, content: "Hi"),
+                ChatMessage(role: .assistant, content: "Hello"),
+            ]
+        )
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            sessionProvider: provider
+        )
+
+        await store.loadSessionIntoChat(id: "hermes-session-1")
+
+        #expect(provider.loadedThreadIDs == ["hermes-session-1"])
+        #expect(store.selectedThread?.title == "Loaded Session")
+        #expect(store.selectedThread?.messages.map(\.content) == ["Hi", "Hello"])
+    }
+
+    @Test
+    func sessionThreadParserAttachesDatabaseToolRowsToAssistantMessage() throws {
+        let json = """
+        [
+          {
+            "session_id": "s1",
+            "title": "Tool Session",
+            "started_at": 1780442800,
+            "updated_at": 1780442810,
+            "role": "user",
+            "content": "Run pwd",
+            "reasoning": "",
+            "tool_name": "",
+            "tool_call_id": "",
+            "timestamp": 1780442801
+          },
+          {
+            "session_id": "s1",
+            "title": "Tool Session",
+            "started_at": 1780442800,
+            "updated_at": 1780442810,
+            "role": "assistant",
+            "content": "",
+            "reasoning": "",
+            "tool_name": "",
+            "tool_call_id": "",
+            "timestamp": 1780442802
+          },
+          {
+            "session_id": "s1",
+            "title": "Tool Session",
+            "started_at": 1780442800,
+            "updated_at": 1780442810,
+            "role": "tool",
+            "content": "/Users/cxd/Developer/hermes_mac_ui",
+            "reasoning": "",
+            "tool_name": "terminal",
+            "tool_call_id": "tool-1",
+            "timestamp": 1780442803
+          },
+          {
+            "session_id": "s1",
+            "title": "Tool Session",
+            "started_at": 1780442800,
+            "updated_at": 1780442810,
+            "role": "assistant",
+            "content": "Done",
+            "reasoning": "",
+            "tool_name": "",
+            "tool_call_id": "",
+            "timestamp": 1780442804
+          }
+        ]
+        """
+
+        let thread = try HermesSessionThreadParser.parse(Data(json.utf8), fallbackID: "s1")
+
+        #expect(thread.messages.map(\.role) == [.user, .assistant])
+        #expect(thread.messages[1].content == "Done")
+        #expect(thread.messages[1].toolEvents.count == 1)
+        #expect(thread.messages[1].toolEvents.first?.toolID == "tool-1")
+        #expect(thread.messages[1].toolEvents.first?.name == "terminal")
+        #expect(thread.messages[1].toolEvents.first?.summary == "/Users/cxd/Developer/hermes_mac_ui")
+    }
+
+    @Test
+    func sessionThreadParserMatchesToolRowsToAssistantToolCallsByID() throws {
+        let json = """
+        [
+          {
+            "session_id": "s1",
+            "title": "Tool Match Session",
+            "started_at": 1780442800,
+            "updated_at": 1780442810,
+            "role": "assistant",
+            "content": "",
+            "reasoning": "",
+            "tool_calls": "[{\\"id\\":\\"call-a\\",\\"call_id\\":\\"call-a\\",\\"name\\":\\"terminal\\",\\"arguments\\":\\"pwd\\"}]",
+            "tool_name": "",
+            "tool_call_id": "",
+            "timestamp": 1780442801
+          },
+          {
+            "session_id": "s1",
+            "title": "Tool Match Session",
+            "started_at": 1780442800,
+            "updated_at": 1780442810,
+            "role": "assistant",
+            "content": "",
+            "reasoning": "",
+            "tool_calls": "[{\\"id\\":\\"call-b\\",\\"call_id\\":\\"call-b\\",\\"name\\":\\"delegate_task\\",\\"arguments\\":\\"news\\"}]",
+            "tool_name": "",
+            "tool_call_id": "",
+            "timestamp": 1780442802
+          },
+          {
+            "session_id": "s1",
+            "title": "Tool Match Session",
+            "started_at": 1780442800,
+            "updated_at": 1780442810,
+            "role": "tool",
+            "content": "delegate result",
+            "reasoning": "",
+            "tool_calls": "",
+            "tool_name": "delegate_task",
+            "tool_call_id": "call-b",
+            "timestamp": 1780442803
+          },
+          {
+            "session_id": "s1",
+            "title": "Tool Match Session",
+            "started_at": 1780442800,
+            "updated_at": 1780442810,
+            "role": "tool",
+            "content": "terminal result",
+            "reasoning": "",
+            "tool_calls": "",
+            "tool_name": "terminal",
+            "tool_call_id": "call-a",
+            "timestamp": 1780442804
+          }
+        ]
+        """
+
+        let thread = try HermesSessionThreadParser.parse(Data(json.utf8), fallbackID: "s1")
+
+        #expect(thread.messages.count == 1)
+        #expect(thread.messages[0].toolEvents.map(\.toolID) == ["call-a", "call-b"])
+        #expect(thread.messages[0].toolEvents.map(\.summary) == ["terminal result", "delegate result"])
+    }
+
+
+    @Test
+    func sessionInfoUpdatesComposerRuntimeSummary() async throws {
+        let client = StubStreamingHermesAgentClient(events: [
+            .sessionInfo(
+                sessionID: "s1",
+                info: HermesSessionInfo(model: "Hermes 4 70B", contextLength: 128000, usedTokens: 2140)
+            ),
+            .messageComplete(sessionID: "s1", text: "Ready", status: "complete", usage: nil),
+        ])
+        let store = ChatStore(agentClient: client)
+
+        await store.send("Hi")
+
+        #expect(store.sessionInfo.displayText == "Hermes 4 70B · 2.1K/128K")
+    }
+
+    @Test
+    func sessionInfoDisplayTextAbbreviatesLargeTokenCounts() {
+        let thousands = HermesSessionInfo(model: "Hermes", contextLength: 128000, usedTokens: 2140)
+        let millions = HermesSessionInfo(model: "Hermes", contextLength: 2_000_000, usedTokens: 1_250_000)
+
+        #expect(thousands.displayText == "Hermes · 2.1K/128K")
+        #expect(millions.displayText == "Hermes · 1.3M/2M")
+    }
+
+    @Test
+    func sessionInfoDisplayTextShowsPartialTokenUsage() {
+        let contextOnly = HermesSessionInfo(model: "Hermes", contextLength: 128000)
+        let usedOnly = HermesSessionInfo(model: "Hermes", usedTokens: 2140)
+
+        #expect(contextOnly.displayText == "Hermes · ?/128K")
+        #expect(usedOnly.displayText == "Hermes · 2.1K/?")
+    }
+
+    @Test
+    func concurrentLoadSessionsAndLoadMoreSessionsDoesNotCorruptState() async throws {
+        let provider = StubDelayingHermesSessionProvider()
+        
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            sessionProvider: provider,
+            sessionPageSize: 2
+        )
+        
+        provider.resultSessions = [
+            HermesSessionListItem(id: "session-1", title: "First"),
+            HermesSessionListItem(id: "session-2", title: "Second")
+        ]
+        await store.loadSessions()
+        
+        #expect(store.canLoadMoreSessions == true)
+        #expect(store.sessionListState.sessions.map(\.id) == ["session-1", "session-2"])
+        
+        let session3 = HermesSessionListItem(id: "session-3", title: "Third")
+        
+        let (stream, continuation) = AsyncStream<Void>.makeStream()
+        let (finishStream, finishContinuation) = AsyncStream<Void>.makeStream()
+        
+        provider.onSessions = { request in
+            if request.offset == 2 {
+                continuation.yield()
+                for await _ in finishStream {
+                    break
+                }
+            }
+        }
+        
+        provider.resultSessions = [session3]
+        
+        let loadMoreTask = Task {
+            await store.loadMoreSessions()
+        }
+        
+        for await _ in stream {
+            break
+        }
+        
+        provider.onSessions = nil
+        provider.resultSessions = [
+            HermesSessionListItem(id: "session-refresh-1", title: "Refresh 1"),
+            HermesSessionListItem(id: "session-refresh-2", title: "Refresh 2")
+        ]
+        
+        await store.loadSessions()
+        #expect(store.sessionListState.sessions.map(\.id) == ["session-refresh-1", "session-refresh-2"])
+        
+        finishContinuation.yield()
+        _ = await loadMoreTask.result
+        
+        #expect(store.sessionListState.sessions.map(\.id) == ["session-refresh-1", "session-refresh-2"])
+    }
+}
+
+private final class StubDelayingHermesSessionProvider: HermesSessionProvider, @unchecked Sendable {
+    var onSessions: ((SessionPageRequest) async -> Void)?
+    var resultSessions: [HermesSessionListItem] = []
+
+    func sessions(page: SessionPageRequest) async throws -> [HermesSessionListItem] {
+        if let onSessions {
+            await onSessions(page)
+        }
+        return resultSessions
+    }
+
+    func deleteSession(id: String) async throws {}
+
+    func sessionThread(id: String) async throws -> ChatThread {
+        ChatThread(title: id)
+    }
+}
+
+@MainActor private final class RecordingHermesAgentClient: HermesAgentClient {
+    let reply: String
+    private var recordedRequests: [HermesChatRequest] = []
+
+    init(reply: String) {
+        self.reply = reply
+    }
+
+    var requests: [HermesChatRequest] {
+        recordedRequests
+    }
+
+    func send(_ request: HermesChatRequest) async throws -> HermesChatResponse {
+        recordedRequests.append(request)
+        return HermesChatResponse(content: reply)
+    }
+}
+
+@MainActor private final class RecordingStreamingHermesAgentClient: HermesAgentClient {
+    let events: [HermesAgentEvent]
+    private var recordedPermissionResponses: [(String, String)] = []
+
+    init(events: [HermesAgentEvent]) {
+        self.events = events
+    }
+
+    var permissionResponses: [(String, String)] {
+        recordedPermissionResponses
+    }
+
+    func send(_ request: HermesChatRequest) async throws -> HermesChatResponse {
+        let final = events.compactMap { event -> String? in
+            if case .messageComplete(_, let text, _, _) = event { return text }
+            return nil
+        }.last ?? ""
+        return HermesChatResponse(content: final)
+    }
+
+    nonisolated func eventStream(for request: HermesChatRequest) -> AsyncThrowingStream<HermesAgentEvent, Error> {
+        AsyncThrowingStream { continuation in
+            for event in events {
+                continuation.yield(event)
+            }
+            continuation.finish()
+        }
+    }
+
+    func respondToPermission(requestID: String, optionID: String) async {
+        recordedPermissionResponses.append((requestID, optionID))
+    }
+}
+
+private struct StubHermesProfileProvider: HermesProfileProvider {
+    var values: [HermesProfile]
+
+    init(profiles: [HermesProfile]) {
+        self.values = profiles
+    }
+
+    func profiles() async throws -> [HermesProfile] {
+        values
+    }
+}
+
+private struct StubHermesModelConfigurationProvider: HermesModelConfigurationProvider {
+    var models: [HermesConfiguredModel]
+
+    func configuredModels() async throws -> [HermesConfiguredModel] {
+        models
+    }
+}
+
+private final class StubHermesJobProvider: HermesJobProvider, @unchecked Sendable {
+    var jobs: [HermesScheduledJob]
+    var requestedProfiles: [String] = []
+
+    init(jobs: [HermesScheduledJob]) {
+        self.jobs = jobs
+    }
+
+    func jobs(for profile: HermesProfile) async throws -> [HermesScheduledJob] {
+        requestedProfiles.append(profile.id)
+        return jobs
+    }
+}
+
+private final class StubHermesPluginProvider: HermesPluginProvider, @unchecked Sendable {
+    var plugins: [HermesInstalledPlugin]
+    var tools: [HermesInstalledTool] = []
+    var updatedPlugins: [(String, Bool)] = []
+    var updatedTools: [(String, Bool)] = []
+
+    init(plugins: [HermesInstalledPlugin], tools: [HermesInstalledTool] = []) {
+        self.plugins = plugins
+        self.tools = tools
+    }
+
+    func installedPlugins() async throws -> [HermesInstalledPlugin] {
+        plugins
+    }
+
+    func installedTools() async throws -> [HermesInstalledTool] {
+        tools
+    }
+
+    func setPlugin(_ name: String, enabled: Bool) async throws {
+        updatedPlugins.append((name, enabled))
+        plugins = plugins.map { plugin in
+            guard plugin.name == name else { return plugin }
+            var updated = plugin
+            updated.status = enabled ? "Enabled" : "Disabled"
+            return updated
+        }
+    }
+
+    func setTool(_ name: String, enabled: Bool) async throws {
+        updatedTools.append((name, enabled))
+        tools = tools.map { tool in
+            guard tool.name == name else { return tool }
+            var updated = tool
+            updated.status = enabled ? "Enabled" : "Disabled"
+            return updated
+        }
+    }
+}
+
+private final class StubHermesSkillProvider: HermesSkillProvider, @unchecked Sendable {
+    var skills: [HermesInstalledSkill]
+    var updatedSkills: [(String, Bool)] = []
+
+    init(skills: [HermesInstalledSkill]) {
+        self.skills = skills
+    }
+
+    func installedSkills() async throws -> [HermesInstalledSkill] {
+        skills
+    }
+
+    func setSkill(_ name: String, enabled: Bool) async throws {
+        updatedSkills.append((name, enabled))
+        skills = skills.map { skill in
+            guard skill.name == name else { return skill }
+            var updated = skill
+            updated.status = enabled ? "enabled" : "disabled"
+            return updated
+        }
+    }
+}
+
+private final class StubHermesSessionProvider: HermesSessionProvider, @unchecked Sendable {
+    var values: [HermesSessionListItem]
+    var pages: [[HermesSessionListItem]]?
+    var deletedIDs: [String] = []
+    var requests: [SessionPageRequest] = []
+    var loadedThreadIDs: [String] = []
+    var loadedThreads: [String: ChatThread] = [:]
+
+    init(sessions: [HermesSessionListItem]) {
+        self.values = sessions
+        self.pages = nil
+    }
+
+    init(pages: [[HermesSessionListItem]]) {
+        self.values = pages.flatMap { $0 }
+        self.pages = pages
+    }
+
+    func sessions(page: SessionPageRequest) async throws -> [HermesSessionListItem] {
+        requests.append(page)
+        if let pages {
+            let index = requests.count - 1
+            guard pages.indices.contains(index) else { return [] }
+            return pages[index]
+        }
+
+        let startIndex = min(page.offset, values.count)
+        let endIndex = min(startIndex + page.limit, values.count)
+        return Array(values[startIndex..<endIndex])
+    }
+
+    func deleteSession(id: String) async throws {
+        deletedIDs.append(id)
+        values.removeAll { $0.id == id }
+        pages = pages?.map { page in page.filter { $0.id != id } }
+    }
+
+    func sessionThread(id: String) async throws -> ChatThread {
+        loadedThreadIDs.append(id)
+        return loadedThreads[id] ?? ChatThread(title: id)
+    }
+}
