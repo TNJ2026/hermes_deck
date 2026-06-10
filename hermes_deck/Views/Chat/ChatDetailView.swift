@@ -342,7 +342,7 @@ struct ChatDetailView: View {
         } else if case .claudeCLI = sendBackend {
             await store.sendToClaudeCLI(message, threadID: threadID)
         } else if let sendProfile {
-            await store.send(message, in: threadID, profile: sendProfile)
+            await store.sendAgentProfile(message, in: threadID, profile: sendProfile)
         }
     }
 

@@ -70,14 +70,14 @@ actor ClaudeCLIClient: HermesAgentClient {
 
     /// True for the `claude --resume` "No conversation found with session ID"
     /// failure, which means the session id is stale and should be recreated.
-    private static func isMissingSessionError(_ error: Error) -> Bool {
+    private nonisolated static func isMissingSessionError(_ error: Error) -> Bool {
         if let hermes = error as? HermesAgentError, case .rpcError(let message) = hermes {
             return message.localizedCaseInsensitiveContains("no conversation found")
         }
         return false
     }
 
-    private static func arguments(text: String, model: String, sessionID: String, resume: Bool) -> [String] {
+    private nonisolated static func arguments(text: String, model: String, sessionID: String, resume: Bool) -> [String] {
         var arguments = [
             "claude", "-p", text,
             "--output-format", "stream-json", "--verbose",
@@ -88,6 +88,10 @@ actor ClaudeCLIClient: HermesAgentClient {
         return arguments
     }
 
+    // @concurrent: with the project's MainActor default isolation this static
+    // would otherwise run on the main actor, and the blocking stderr read /
+    // waitUntilExit would freeze the UI for the whole CLI turn.
+    @concurrent
     private static func run(
         arguments: [String],
         workingDirectory: URL,
@@ -151,7 +155,7 @@ actor ClaudeCLIClient: HermesAgentClient {
 }
 
 /// Pure mapping from Claude Code stream-json lines to `HermesAgentEvent`.
-enum ClaudeStreamParser {
+nonisolated enum ClaudeStreamParser {
     static func parse(_ line: String, sessionID: String) -> [HermesAgentEvent] {
         guard let data = line.data(using: .utf8),
               let object = (try? JSONDecoder().decode(TUIJSONValue.self, from: data))?.objectValue else { return [] }

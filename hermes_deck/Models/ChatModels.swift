@@ -63,6 +63,11 @@ struct ChatMessage: Identifiable, Hashable, Codable, Sendable {
     var segments: [AssistantSegment]
     var reasoningText: String
     var routedSourceProfileName: String?
+    /// Set when this assistant message is an `@mention` reply echoed back into a
+    /// source thread: the routed agent's display name. Drives the attribution
+    /// pill explicitly, so ordinary `Label:\n\nbody` content is never misread as
+    /// an agent reply.
+    var agentReplyName: String?
     /// True for messages reconstructed from a stored session. The store has no
     /// real generation duration for these, so the timer is suppressed instead
     /// of showing a meaningless 0s.
@@ -78,6 +83,7 @@ struct ChatMessage: Identifiable, Hashable, Codable, Sendable {
         segments: [AssistantSegment] = [],
         reasoningText: String = "",
         routedSourceProfileName: String? = nil,
+        agentReplyName: String? = nil,
         isHistorical: Bool = false
     ) {
         self.id = id
@@ -89,6 +95,7 @@ struct ChatMessage: Identifiable, Hashable, Codable, Sendable {
         self.segments = segments
         self.reasoningText = reasoningText
         self.routedSourceProfileName = routedSourceProfileName
+        self.agentReplyName = agentReplyName
         self.isHistorical = isHistorical
     }
 
@@ -280,10 +287,17 @@ enum ExternalAgentReplySource: Equatable, Sendable {
 }
 
 struct ExternalAgentReplyAttribution: Equatable, Sendable {
-    var source: ExternalAgentReplySource
+    /// `nil` for a Hermes profile reply (no fixed brand color); set for the known
+    /// external agents (claude / codex / gemini).
+    var source: ExternalAgentReplySource?
     var displayName: String
     var body: String
 
+    /// Parses an external agent reply whose content embeds a known brand label
+    /// (`Claude Code:\n\nbody`). Only the known external agents are recognized,
+    /// so ordinary assistant prose that merely contains `Word:\n\n…` is never
+    /// misread. Hermes-profile echoes carry their name out-of-band via
+    /// `ChatMessage.agentReplyName` instead of going through this path.
     static func parse(_ content: String) -> ExternalAgentReplyAttribution? {
         let separator = ":\n\n"
         guard let separatorRange = content.range(of: separator) else { return nil }
@@ -447,6 +461,97 @@ extension AgentMentionRouteParser {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !routed.isEmpty else { return nil }
             return String(routed)
+        }
+        return nil
+    }
+
+    /// Every `@alias` mention in `text` (across `aliasGroups`), each paired with
+    /// the prompt segment that follows it — up to the next mention or the end.
+    /// Lets one composed message fan out to multiple @-mentioned agents, each
+    /// getting only the text after its own mention.
+    ///
+    /// With `requireLineLeading`, only mentions whose `@` leads its line (after
+    /// optional indentation) count as routes; mid-prose mentions are left in
+    /// the surrounding segment text. Agent replies use this so prose can
+    /// precede the addressed mention without "ask @claude about X" routing.
+    static func routeSpans(
+        in text: String,
+        aliasGroups: [[String]],
+        requireLineLeading: Bool = false
+    ) -> [(groupIndex: Int, message: String)] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        // (groupIndex, alias) longest-first so "@claude code" beats "@claude";
+        // equal lengths break ties by group order (external groups precede hermes
+        // ones) — `sort` is not stable, so the tiebreak must be explicit.
+        var candidates: [(group: Int, alias: String)] = []
+        for (groupIndex, aliases) in aliasGroups.enumerated() {
+            for alias in aliases {
+                let cleaned = alias.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cleaned.isEmpty { candidates.append((groupIndex, cleaned)) }
+            }
+        }
+        candidates.sort {
+            $0.alias.count != $1.alias.count ? $0.alias.count > $1.alias.count : $0.group < $1.group
+        }
+
+        var mentions: [(group: Int, range: Range<String.Index>)] = []
+        var index = trimmed.startIndex
+        while index < trimmed.endIndex {
+            if trimmed[index] == "@",
+               !requireLineLeading || isLineLeading(in: trimmed, at: index),
+               let match = matchMention(in: trimmed, at: index, candidates: candidates) {
+                mentions.append((match.group, index..<match.end))
+                index = match.end
+            } else {
+                index = trimmed.index(after: index)
+            }
+        }
+
+        return mentions.enumerated().map { offset, mention in
+            let stop = offset + 1 < mentions.count ? mentions[offset + 1].range.lowerBound : trimmed.endIndex
+            let message = trimmed[mention.range.upperBound..<stop]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (mention.group, message)
+        }
+    }
+
+    /// Whether `atIndex` is at the start of its line, allowing only spaces or
+    /// tabs between the previous newline (or start of text) and the index.
+    private static func isLineLeading(in text: String, at atIndex: String.Index) -> Bool {
+        var index = atIndex
+        while index > text.startIndex {
+            let prior = text.index(before: index)
+            let character = text[prior]
+            if character.isNewline { return true }
+            guard character == " " || character == "\t" else { return false }
+            index = prior
+        }
+        return true
+    }
+
+    /// Matches `@<alias>` at `atIndex` (the `@`), honoring the mention boundary
+    /// rules. Returns the matched group and the index just past the alias.
+    private static func matchMention(
+        in text: String,
+        at atIndex: String.Index,
+        candidates: [(group: Int, alias: String)]
+    ) -> (group: Int, end: String.Index)? {
+        let precededOK = atIndex == text.startIndex
+            || !isMentionNameCharacter(text[text.index(before: atIndex)])
+        guard precededOK else { return nil }
+        let afterAt = text.index(after: atIndex)
+        for candidate in candidates {
+            guard let end = text.index(afterAt, offsetBy: candidate.alias.count, limitedBy: text.endIndex) else {
+                continue
+            }
+            guard text[afterAt..<end].compare(candidate.alias, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame else {
+                continue
+            }
+            let followedOK = end == text.endIndex || !isMentionNameCharacter(text[end])
+            guard followedOK else { continue }
+            return (candidate.group, end)
         }
         return nil
     }

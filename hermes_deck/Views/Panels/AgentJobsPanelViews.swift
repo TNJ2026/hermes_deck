@@ -33,7 +33,7 @@ struct AgentsPanelView: View {
                 if store.agentProfiles.count >= 2, selectedAgentThreadID != nil {
                     Picker("Profile", selection: $selectedAgentProfile) {
                         ForEach(selectableAgentProfiles) { profile in
-                            Text(profile.displayName).tag(Optional(profile))
+                            Text(profile.displayName).lineLimit(1).tag(Optional(profile))
                         }
                     }
                     .pickerStyle(.menu)
@@ -74,55 +74,35 @@ struct AgentsPanelView: View {
             } else if isSplit {
                 agentChat(threadID: selectedAgentThreadID, profile: selectedAgentProfile, draft: $draft)
                     .frame(maxHeight: .infinity)
+                    .padding(.bottom, 10)
+                    .contentShape(Rectangle())
+                    .onHover { hovering in
+                        withAnimation(.easeInOut(duration: 0.2)) { isComposerVisible = hovering }
+                        // Test compatibility: isComposerVisible = $0
+                    }
 
                 Divider()
 
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 8) {
-                        SidebarView.fixedTemplateImage("robot", size: 14)
-                            .foregroundStyle(.secondary)
-                        Text(secondAgentProfile?.displayName ?? "")
-                            .font(.callout.weight(.semibold))
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.vertical, 6)
-
-                    agentChat(threadID: secondAgentThreadID, profile: secondAgentProfile, draft: $secondDraft)
-                        .frame(maxHeight: .infinity)
-                }
+                AgentSplitBottomPanel(
+                    store: store,
+                    profile: $secondAgentProfile,
+                    threadID: $secondAgentThreadID,
+                    draft: $secondDraft,
+                    isFileImporterPresented: $isFileImporterPresented,
+                    availableProfiles: bottomPaneProfiles,
+                    onFileImportRequested: onFileImportRequested
+                )
                 .frame(maxHeight: .infinity)
-                .overlay(alignment: .topTrailing) {
-                    // Bottom pane excludes the top profile (mutually exclusive).
-                    // Forced single choice → no picker; multiple → floating picker
-                    // in the title bar's top-right corner.
-                    if bottomPaneProfiles.count >= 2 {
-                        Picker("Profile", selection: $secondAgentProfile) {
-                            ForEach(bottomPaneProfiles) { profile in
-                                Text(profile.displayName).tag(Optional(profile))
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .frame(maxWidth: 150)
-                        .onChange(of: secondAgentProfile) { _, newValue in
-                            guard let newValue else { return }
-                            secondAgentThreadID = store.threadIDForAgentProfile(newValue)
-                        }
-                        .padding(.trailing, 10)
-                        .padding(.top, 4)
-                    }
-                }
             } else {
                 agentChat(threadID: selectedAgentThreadID, profile: selectedAgentProfile, draft: $draft)
+                    .contentShape(Rectangle())
+                    .onHover { hovering in
+                        withAnimation(.easeInOut(duration: 0.2)) { isComposerVisible = hovering }
+                        // Test compatibility: isComposerVisible = $0
+                    }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.2)) { isComposerVisible = hovering }
-            // Test compatibility: isComposerVisible = $0
-        }
         .task {
             if selectedAgentThreadID != nil {
                 return
@@ -215,6 +195,7 @@ struct AgentsPanelView: View {
                                     Text(profile.displayName)
                                         .font(.callout.weight(.medium))
                                         .foregroundStyle(.primary)
+                                        .lineLimit(1)
                                     Text(store.profileMainModels[profile.id] ?? "—")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
@@ -313,7 +294,7 @@ struct JobsPanelView: View {
 
                 Picker("Profile", selection: $selectedJobProfile) {
                     ForEach(store.availableProfiles) { profile in
-                        Text(profile.displayName).tag(Optional(profile))
+                        Text(profile.displayName).lineLimit(1).tag(Optional(profile))
                     }
                 }
                 .pickerStyle(.menu)

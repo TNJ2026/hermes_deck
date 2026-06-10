@@ -19,9 +19,18 @@ struct MessageBubble: View {
                                     prompt: message.content
                                 )
                             } else if message.role == .assistant,
+                                      let replyName = message.agentReplyName {
+                                ExternalAgentReplyContent(attribution: ExternalAgentReplyAttribution(
+                                    source: ExternalAgentReplySource.parse(displayName: replyName),
+                                    displayName: replyName,
+                                    body: message.content
+                                ))
+                            } else if message.role == .assistant,
                                       let attribution = ExternalAgentReplyAttribution.parse(message.content) {
                                 ExternalAgentReplyContent(attribution: attribution)
                             } else if shouldRenderMarkdown {
+                                // User prompts and completed assistant replies both
+                                // render as Markdown.
                                 MarkdownView(message.content)
                             } else {
                                 Text(message.content)
@@ -69,6 +78,9 @@ struct ExternalAgentReplyContent: View {
             Text("\(attribution.displayName):")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(sourceColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(sourceColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 6))
                 .textSelection(.enabled)
 
             MarkdownView(attribution.body)
@@ -82,6 +94,12 @@ struct ExternalAgentReplyContent: View {
 }
 
 enum ExternalAgentAppearance {
+    /// `nil` source (a Hermes profile reply) falls back to the accent color.
+    static func color(for source: ExternalAgentReplySource?) -> Color {
+        guard let source else { return .accentColor }
+        return color(for: source)
+    }
+
     static func color(for source: ExternalAgentReplySource) -> Color {
         switch source {
         case .claude:
@@ -117,21 +135,17 @@ struct RoutedUserPromptContent: View {
     let prompt: String
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(sourceProfileName)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(sourceProfileName)@You")
                 .font(.callout.weight(.semibold))
                 .lineLimit(1)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(Color.accentColor.opacity(0.16), in: Capsule())
+                .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 6))
                 .overlay {
-                    Capsule()
+                    RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.accentColor.opacity(0.24))
                 }
-
-            Text(":")
-                .font(.body)
-                .foregroundStyle(.secondary)
 
             Text(prompt)
                 .font(.body)

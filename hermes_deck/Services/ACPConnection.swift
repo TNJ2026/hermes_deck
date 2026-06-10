@@ -251,7 +251,7 @@ actor ACPConnection {
     }
 }
 
-extension TUIJSONValue {
+nonisolated extension TUIJSONValue {
     var objectValue: [String: TUIJSONValue]? {
         if case .object(let value) = self { return value }
         return nil

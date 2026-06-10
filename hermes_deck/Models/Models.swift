@@ -117,43 +117,47 @@ final class ChatStore {
             ),
             ExternalAgentMentionTarget(
                 aliases: ["gemini", "antigravity", "agy"],
-                profile: HermesProfile(id: "agy", displayName: "Gemini (Antigravity)"),
+                profile: HermesProfile(id: "agy", displayName: "Gemini"),
                 backend: .agy
             ),
         ]
     }
 
-    private func externalAgentRoute(for text: String) -> (target: ExternalAgentMentionTarget, message: String)? {
+    /// All `@mention` routes in `text`: each mentioned agent (external targets
+    /// first, then Hermes profiles) paired with the prompt segment that follows
+    /// its mention. One composed message fans out to every @-mentioned agent,
+    /// each receiving only the text after its own mention.
+    private func resolvedMentionRoutes(
+        for text: String,
+        requireLineLeading: Bool = false
+    ) -> [(target: AgentRouteTarget, message: String, returnsReply: Bool, isExternal: Bool)] {
+        var groups: [(aliases: [String], target: AgentRouteTarget, isExternal: Bool)] = []
         for target in externalAgentMentionTargets {
-            if let message = AgentMentionRouteParser.routedMessage(in: text, aliases: target.aliases) {
-                return (target, message)
-            }
+            groups.append((target.aliases, AgentRouteTarget(profile: target.profile, backend: target.backend), true))
         }
-        return nil
-    }
-
-    private func mentionRouteTarget(for text: String) -> (target: AgentRouteTarget, message: String, returnsReply: Bool, isExternal: Bool)? {
-        if let external = externalAgentRoute(for: text) {
-            let directive = AgentReturnDirective.parse(external.message)
-            return (
-                AgentRouteTarget(profile: external.target.profile, backend: external.target.backend),
-                directive.message,
-                directive.returnsReply,
-                true
-            )
+        for profile in agentProfiles {
+            let aliases = [profile.id, profile.displayName]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            groups.append((aliases, AgentRouteTarget(profile: profile, backend: .hermes), false))
         }
 
-        if let route = AgentMentionRouteParser.parse(text, profiles: agentProfiles) {
-            let directive = AgentReturnDirective.parse(route.message)
-            return (
-                AgentRouteTarget(profile: route.profile, backend: .hermes),
-                directive.message,
-                directive.returnsReply,
-                false
-            )
+        let spans = AgentMentionRouteParser.routeSpans(
+            in: text,
+            aliasGroups: groups.map(\.aliases),
+            requireLineLeading: requireLineLeading
+        )
+        var seenTargets = Set<String>()
+        return spans.compactMap { span in
+            guard span.groupIndex < groups.count else { return nil }
+            let group = groups[span.groupIndex]
+            let directive = AgentReturnDirective.parse(span.message)
+            guard !directive.message.isEmpty else { return nil }
+            // One agent can only be addressed once per message; later duplicate
+            // mentions of the same target would race on its shared thread.
+            guard seenTargets.insert(group.target.profile.id).inserted else { return nil }
+            return (group.target, directive.message, directive.returnsReply, group.isExternal)
         }
-
-        return nil
     }
 
     /// Working directory for an agent thread: an explicit in-session override,
@@ -199,8 +203,8 @@ final class ChatStore {
     }
 
     /// Whether `text` mentions a forwardable agent (external or Hermes profile).
-    func hasMentionRoute(_ text: String) -> Bool {
-        mentionRouteTarget(for: text) != nil
+    func hasMentionRoute(_ text: String, requireLineLeading: Bool = false) -> Bool {
+        !resolvedMentionRoutes(for: text, requireLineLeading: requireLineLeading).isEmpty
     }
 
     /// Forwards an `@mention` prompt to its target agent when the source is
@@ -212,41 +216,90 @@ final class ChatStore {
         _ text: String,
         from source: PromptRouteSource,
         sourceThreadID: UUID,
-        notifiesPanel: Bool = true
+        notifiesPanel: Bool = true,
+        appendUserMessage: Bool = true,
+        closesLoopToSource: Bool = false,
+        requireLineLeading: Bool = false
     ) async -> PromptRouteResult {
-        guard let route = mentionRouteTarget(for: text) else { return .notMention }
-        guard case .hermes = source else { return .denied(.externalSourceCannotRoute) }
+        let routes = resolvedMentionRoutes(for: text, requireLineLeading: requireLineLeading)
+        guard !routes.isEmpty else { return .notMention }
+        guard case .hermes(let sourceProfile) = source else { return .denied(.externalSourceCannotRoute) }
 
         let sourceAttachments = takePendingAttachmentsForRoute(from: sourceThreadID)
-        append(ChatMessage(role: .user, content: text, attachments: sourceAttachments), to: sourceThreadID)
+        if appendUserMessage {
+            append(ChatMessage(role: .user, content: text, attachments: sourceAttachments), to: sourceThreadID)
+        }
         historyThreadIDs.insert(sourceThreadID)
+        let sourceName = source.displayName
 
-        let agentThreadID = threadIDForAgentProfile(route.target.profile)
-        threadBackends[agentThreadID] = route.target.backend
-        agentPendingAttachments[agentThreadID, default: []].append(contentsOf: sourceAttachments)
-        if notifiesPanel {
-            if route.isExternal {
-                pendingExternalAgentPanel = route.target.backend
-            } else {
-                latestAgentRouteRequest = AgentRouteRequest(
-                    profile: route.target.profile,
-                    threadID: agentThreadID,
-                    sourceThreadID: sourceThreadID
-                )
+        // Fan out in parallel: each @mentioned agent gets the segment after its
+        // mention, echoes its reply back into the source thread, and (for replies
+        // that opt in) returns it for the close-the-loop follow-up below.
+        let replies = await withTaskGroup(of: Optional<(name: String, reply: String)>.self) { group in
+            for (offset, route) in routes.enumerated() {
+                let agentThreadID = threadIDForAgentProfile(route.target.profile)
+                threadBackends[agentThreadID] = route.target.backend
+                // Attachments ride along with the first mention only.
+                if offset == 0, !sourceAttachments.isEmpty {
+                    agentPendingAttachments[agentThreadID, default: []].append(contentsOf: sourceAttachments)
+                }
+                if notifiesPanel {
+                    if route.isExternal {
+                        pendingExternalAgentPanel = route.target.backend
+                    } else {
+                        latestAgentRouteRequest = AgentRouteRequest(
+                            profile: route.target.profile,
+                            threadID: agentThreadID,
+                            sourceThreadID: sourceThreadID
+                        )
+                    }
+                }
+
+                let message = route.message
+                let profile = route.target.profile
+                let returnsReply = route.returnsReply
+                let isExternal = route.isExternal
+                group.addTask { @MainActor [self] in
+                    // Stagger external agents' first launch: booting several
+                    // npx/node/CLI adapters at once spikes CPU/IO and janks the
+                    // UI. A short offset spreads the cold-start cost.
+                    if isExternal, offset > 0 {
+                        try? await Task.sleep(for: .milliseconds(offset * 300))
+                    }
+                    let routedResult = await send(
+                        message,
+                        in: agentThreadID,
+                        profile: profile,
+                        routedSourceProfileName: sourceName
+                    )
+                    guard returnsReply, let routedResult, !routedResult.isEmpty else {
+                        return nil
+                    }
+                    append(
+                        ChatMessage(role: .assistant, content: routedResult, completedAt: .now, agentReplyName: profile.displayName),
+                        to: sourceThreadID
+                    )
+                    return (name: profile.displayName, reply: routedResult)
+                }
             }
+            var collected: [(name: String, reply: String)] = []
+            for await result in group {
+                if let result { collected.append(result) }
+            }
+            return collected
         }
 
-        let routedResult = await send(
-            route.message,
-            in: agentThreadID,
-            profile: route.target.profile,
-            routedSourceProfileName: source.displayName
-        )
-        if route.returnsReply, let routedResult, !routedResult.isEmpty {
-            append(
-                ChatMessage(role: .assistant, content: "\(route.target.profile.displayName):\n\n\(routedResult)", completedAt: .now),
-                to: sourceThreadID
-            )
+        // Close the loop: when an agent's own reply triggered this routing
+        // (`closesLoopToSource`), feed the mentioned agents' replies back to that
+        // source agent as a single follow-up turn — so it actually receives them
+        // instead of the replies just sitting in its thread as display echoes.
+        // Dispatched through the low-level `send` (no forwarding), so this
+        // follow-up is terminal and the chain stays single-hop.
+        if closesLoopToSource, !replies.isEmpty {
+            let framed = replies
+                .map { "\($0.name) replied:\n\n\($0.reply)" }
+                .joined(separator: "\n\n———\n\n")
+            _ = await send(framed, in: sourceThreadID, profile: sourceProfile)
         }
         return .routed
     }
@@ -348,7 +401,7 @@ final class ChatStore {
     /// Finds or creates the chat thread bound to the Antigravity (`agy`) CLI.
     @discardableResult
     func agyThread() -> UUID {
-        let profile = HermesProfile(id: "agy", displayName: "Gemini (Antigravity)")
+        let profile = HermesProfile(id: "agy", displayName: "Gemini")
         if let thread = threads.first(where: { $0.profile.id == profile.id }) {
             threadBackends[thread.id] = .agy
             return thread.id
@@ -361,7 +414,7 @@ final class ChatStore {
 
     func sendToAgy(_ rawText: String, threadID: UUID) async {
         threadBackends[threadID] = .agy
-        let profile = thread(id: threadID)?.profile ?? HermesProfile(id: "agy", displayName: "Gemini (Antigravity)")
+        let profile = thread(id: threadID)?.profile ?? HermesProfile(id: "agy", displayName: "Gemini")
         await send(rawText, in: threadID, profile: profile)
     }
 
@@ -546,6 +599,41 @@ final class ChatStore {
         } catch {
             skillListState = .failed(error.localizedDescription)
         }
+    }
+
+    /// The two `@`-routing skills the Deck surfaces and manages (but does not
+    /// drive — they complement the Deck's own client-side `@mention` forwarding):
+    /// `agent-routing` shells out via `route.sh` (headless/cron), `deck-routing`
+    /// is the reply-with-`@target` convention the Deck itself forwards.
+    static let agentRoutingSkillName = "agent-routing"
+    static let deckRoutingSkillName = "deck-routing"
+
+    enum RoutingSkillState: Equatable, Sendable {
+        case unknown                 // skill list not loaded yet (or failed)
+        case notInstalled
+        case installed(enabled: Bool)
+    }
+
+    /// Install/enabled status of a skill (by name) for the current profile,
+    /// derived from the loaded skill list.
+    func routingSkillState(named name: String) -> RoutingSkillState {
+        guard case .loaded(let skills) = skillListState else { return .unknown }
+        guard let skill = skills.first(where: {
+            $0.name.caseInsensitiveCompare(name) == .orderedSame
+        }) else { return .notInstalled }
+        return .installed(enabled: skill.status.caseInsensitiveCompare("enabled") == .orderedSame)
+    }
+
+    /// Enables/disables a skill by name (loading the list first if needed).
+    /// No-op when the skill is not installed.
+    func setRoutingSkill(named name: String, enabled: Bool) async {
+        if case .loaded = skillListState {} else { await loadInstalledSkills() }
+        guard case .loaded(let skills) = skillListState,
+              let skill = skills.first(where: {
+                  $0.name.caseInsensitiveCompare(name) == .orderedSame
+              })
+        else { return }
+        await setSkill(skill, enabled: enabled)
     }
 
     func loadJobs(for profile: HermesProfile) async {
@@ -825,13 +913,48 @@ final class ChatStore {
         }
         guard let selectedThreadID else { return }
 
-        await send(
+        let reply = await send(
             text,
             in: selectedThreadID,
             profile: selectedProfile,
             usesGlobalSendState: true
         )
         await loadHistorySessions()
+
+        await forwardAddressedReply(reply, from: selectedProfile, sourceThreadID: selectedThreadID)
+    }
+
+    /// Single hop: if a Hermes profile's reply is *deliberately addressed* — an
+    /// `@mention` that routes leads a line (not necessarily the first one) —
+    /// forward it to the mentioned agent(s) and echo their replies back into
+    /// `sourceThreadID`. A bare `@name` mid-prose ("ask @claude about X") must
+    /// not trigger an unsolicited fan-out.
+    ///
+    /// `routePromptIfAllowed` dispatches through the low-level `send`, which does
+    /// not itself forward — so a forwarded agent's reply is never re-parsed and
+    /// the chain stops after one hop. Keep forwarding out of the low-level `send`
+    /// to preserve that invariant.
+    private func forwardAddressedReply(_ reply: String?, from profile: HermesProfile, sourceThreadID: UUID) async {
+        guard let reply, hasMentionRoute(reply, requireLineLeading: true) else { return }
+        _ = await routePromptIfAllowed(
+            reply,
+            from: .hermes(profile: profile),
+            sourceThreadID: sourceThreadID,
+            notifiesPanel: false,
+            appendUserMessage: false,
+            closesLoopToSource: true,
+            requireLineLeading: true
+        )
+    }
+
+    /// Sends a prompt in a Hermes-profile agent thread (the agent side panels),
+    /// then applies the same single-hop reply forwarding the main chat does, so a
+    /// profile's reply can `@mention` other profiles/CLIs from within a panel.
+    @discardableResult
+    func sendAgentProfile(_ rawText: String, in threadID: UUID, profile: HermesProfile) async -> String? {
+        let reply = await send(rawText, in: threadID, profile: profile)
+        await forwardAddressedReply(reply, from: profile, sourceThreadID: threadID)
+        return reply
     }
 
     /// Slash commands handled by the app's own UI (or not meaningful here), so

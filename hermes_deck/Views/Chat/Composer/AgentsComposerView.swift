@@ -30,6 +30,10 @@ struct AgentsComposerView: View {
     @State private var mentionSelectedIndex = 0
     @State private var suppressedMentionQuery: String?
     @State private var mentionPopupHeight: CGFloat = 0
+    @State private var textHeight: CGFloat = 24
+    /// Candidate ids already @-mentioned in the draft; recomputed only when
+    /// `draft` changes (not on every popup re-render).
+    @State private var mentionedCandidateCache: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -61,13 +65,15 @@ struct AgentsComposerView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                TextField("Ask anything", text: $draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...3)
-                    .font(.system(size: 14.5))
-                    .frame(minHeight: 24, alignment: .topLeading)
-                    .onSubmit(send)
-                    .onKeyPress { press in handleMentionKey(press) }
+                MentionTextView(
+                    text: $draft,
+                    placeholder: "Ask anything",
+                    aliases: mentionAliases,
+                    onSubmit: send,
+                    onKeyCommand: handleMentionCommand,
+                    onHeightChange: { textHeight = $0 }
+                )
+                .frame(height: textHeight)
 
                 HStack(alignment: .center, spacing: 7) {
                     if speechTranscriber.isRecording {
@@ -157,6 +163,9 @@ struct AgentsComposerView: View {
         .onChange(of: speechTranscriber.transcript) { _, newValue in
             updateDraft(withTranscript: newValue)
         }
+        .onChange(of: draft) { _, _ in
+            mentionedCandidateCache = computeMentionedCandidateIDs()
+        }
         .onDisappear {
             speechTranscriber.stopRecording()
         }
@@ -185,14 +194,16 @@ struct AgentsComposerView: View {
     // MARK: - @ mention autocomplete
 
     private var mentionCandidates: [MentionCandidate] {
-        let hermes = store.agentProfiles.map { profile in
-            MentionCandidate(
-                id: profile.id,
-                label: profile.displayName,
-                subtitle: store.profileMainModels[profile.id] ?? "Hermes profile",
-                alias: profile.id
-            )
-        }
+        let hermes = store.agentProfiles
+            .filter { $0.id != store.selectedProfile.id }
+            .map { profile in
+                MentionCandidate(
+                    id: profile.id,
+                    label: profile.displayName,
+                    subtitle: store.profileMainModels[profile.id] ?? "Hermes profile",
+                    alias: profile.id
+                )
+            }
         let external = store.externalAgentMentionTargets.map { target in
             MentionCandidate(
                 id: target.profile.id,
@@ -203,6 +214,8 @@ struct AgentsComposerView: View {
         }
         return hermes + external
     }
+
+    private var mentionAliases: [String] { mentionCandidates.map(\.alias) }
 
     private static func backendLabel(_ backend: AgentBackend) -> String {
         switch backend {
@@ -220,10 +233,36 @@ struct AgentsComposerView: View {
     }
 
     private func filteredCandidates(for query: String) -> [MentionCandidate] {
-        guard !query.isEmpty else { return mentionCandidates }
-        return mentionCandidates.filter {
+        let available = mentionCandidates.filter { !mentionedCandidateCache.contains($0.id) }
+        guard !query.isEmpty else { return available }
+        return available.filter {
             $0.alias.lowercased().contains(query) || $0.label.lowercased().contains(query)
         }
+    }
+
+    /// Candidate ids already @-mentioned in the draft (excluding the mention
+    /// being typed right now) — so each agent can only be mentioned once.
+    /// Cached in `mentionedCandidateCache`; recomputed via `onChange(draft)`.
+    private func computeMentionedCandidateIDs() -> Set<String> {
+        var text = draft
+        if let mention = activeMention {
+            text.removeSubrange(mention.range)
+        }
+        var ids: Set<String> = []
+        for target in store.externalAgentMentionTargets {
+            if !AgentMentionRouteParser.routeSpans(in: text, aliasGroups: [target.aliases]).isEmpty {
+                ids.insert(target.profile.id)
+            }
+        }
+        for profile in store.agentProfiles {
+            let aliases = [profile.id, profile.displayName]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if !AgentMentionRouteParser.routeSpans(in: text, aliasGroups: [aliases]).isEmpty {
+                ids.insert(profile.id)
+            }
+        }
+        return ids
     }
 
     private func insertMention(_ candidate: MentionCandidate, replacing range: Range<String.Index>) {
@@ -232,34 +271,45 @@ struct AgentsComposerView: View {
         mentionSelectedIndex = 0
     }
 
-    private func handleMentionKey(_ press: KeyPress) -> KeyPress.Result {
-        guard let mention = activeMention else { return .ignored }
+    private func handleMentionCommand(_ command: MentionKeyCommand) -> Bool {
+        guard let mention = activeMention else { return false }
         let candidates = filteredCandidates(for: mention.query)
-        guard !candidates.isEmpty else { return .ignored }
+        guard !candidates.isEmpty else { return false }
 
-        switch press.key {
-        case .downArrow:
+        switch command {
+        case .moveDown:
             mentionSelectedIndex = (mentionSelectedIndex + 1) % candidates.count
-            return .handled
-        case .upArrow:
+            return true
+        case .moveUp:
             mentionSelectedIndex = (mentionSelectedIndex - 1 + candidates.count) % candidates.count
-            return .handled
-        case .return, .tab:
+            return true
+        case .confirm:
             let index = min(max(mentionSelectedIndex, 0), candidates.count - 1)
             insertMention(candidates[index], replacing: mention.range)
-            return .handled
-        case .escape:
+            return true
+        case .dismiss:
             suppressedMentionQuery = mention.query
-            return .handled
-        default:
-            return .ignored
+            return true
         }
     }
 
     // MARK: - Send state
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && currentSendState != .sending
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        currentSendState != .sending &&
+        hasContentBeyondMentions
+    }
+
+    private var hasContentBeyondMentions: Bool {
+        let ranges = MentionTextView.mentionRanges(in: draft, sortedAliases: mentionAliases.sorted { $0.count > $1.count })
+        var remaining = draft
+        for range in ranges.reversed() {
+            if let strRange = Range(range, in: remaining) {
+                remaining.removeSubrange(strRange)
+            }
+        }
+        return !remaining.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var isSending: Bool {

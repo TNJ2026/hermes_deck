@@ -399,11 +399,183 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
         #expect(store.selectedThreadID == originalSelectedThreadID)
         #expect(store.thread(id: originalSelectedThreadID)?.messages.map(\.role) == [.user, .assistant])
         #expect(store.thread(id: originalSelectedThreadID)?.messages.first?.content == "@coding inspect this")
-        #expect(store.thread(id: originalSelectedThreadID)?.messages.last?.content == "Coding:\n\nagent ok")
+        // The echoed reply carries clean body text; attribution is out-of-band.
+        #expect(store.thread(id: originalSelectedThreadID)?.messages.last?.content == "agent ok")
+        #expect(store.thread(id: originalSelectedThreadID)?.messages.last?.agentReplyName == "Coding")
         let codingThread = try #require(store.threads.first { $0.profile.id == "coding" })
         #expect(codingThread.messages.first?.content == "inspect this")
         #expect(codingThread.messages.first?.routedSourceProfileName == "Hermes agent")
         #expect(codingThread.messages.map(\.role) == [.user, .assistant])
+    }
+
+    @Test
+    func multipleProfileMentionsFanOutEachSegmentToItsProfile() async throws {
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "ok"),
+            threads: [defaultThread]
+        )
+        store.availableProfiles = [
+            HermesProfile(id: "default", displayName: "Hermes agent"),
+            HermesProfile(id: "coding", displayName: "Coding"),
+            HermesProfile(id: "research", displayName: "Research"),
+        ]
+
+        await store.send("@coding do A @research do B")
+
+        // Each mentioned profile receives only the segment after its mention.
+        let coding = try #require(store.threads.first { $0.profile.id == "coding" })
+        #expect(coding.messages.first?.content == "do A")
+        let research = try #require(store.threads.first { $0.profile.id == "research" })
+        #expect(research.messages.first?.content == "do B")
+    }
+
+    @Test
+    func agentPanelProfileReplyForwardsAddressedMention() async throws {
+        // A profile in an agent side panel whose reply leads with `@coding`
+        // forwards that reply to coding (single hop) and echoes coding's reply
+        // back into the panel thread.
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "@coding investigate"),
+            threads: [defaultThread]
+        )
+        store.availableProfiles = [
+            HermesProfile(id: "default", displayName: "Hermes agent"),
+            HermesProfile(id: "researcher", displayName: "Researcher"),
+            HermesProfile(id: "coding", displayName: "Coding"),
+        ]
+        let researcher = HermesProfile(id: "researcher", displayName: "Researcher")
+        let researcherThreadID = store.threadIDForAgentProfile(researcher)
+
+        await store.sendAgentProfile("dig in", in: researcherThreadID, profile: researcher)
+
+        // Coding got only the segment after its mention, exactly once (single hop:
+        // coding's own "@coding …" reply is not re-forwarded).
+        let coding = try #require(store.threads.first { $0.profile.id == "coding" })
+        #expect(coding.messages.filter { $0.role == .user }.map(\.content) == ["investigate"])
+
+        let researcherMsgs = try #require(store.thread(id: researcherThreadID)?.messages)
+        // Coding's reply is echoed back into the researcher panel thread …
+        #expect(researcherMsgs.contains { $0.agentReplyName == "Coding" })
+        // … and fed back to the researcher as a follow-up turn (close the loop),
+        // so the source agent actually receives it.
+        #expect(researcherMsgs.contains { $0.role == .user && $0.content.hasPrefix("Coding replied:") })
+    }
+
+    @Test
+    func profileReplyWithLineLeadingMentionAfterProseForwards() async throws {
+        // The addressed mention no longer has to open the reply — prose may
+        // precede it, as long as the mention leads its own line.
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "Here is my analysis.\n@coding investigate the crash"),
+            threads: [defaultThread]
+        )
+        store.availableProfiles = [
+            HermesProfile(id: "default", displayName: "Hermes agent"),
+            HermesProfile(id: "researcher", displayName: "Researcher"),
+            HermesProfile(id: "coding", displayName: "Coding"),
+        ]
+        let researcher = HermesProfile(id: "researcher", displayName: "Researcher")
+        let researcherThreadID = store.threadIDForAgentProfile(researcher)
+
+        await store.sendAgentProfile("dig in", in: researcherThreadID, profile: researcher)
+
+        let coding = try #require(store.threads.first { $0.profile.id == "coding" })
+        #expect(coding.messages.filter { $0.role == .user }.map(\.content) == ["investigate the crash"])
+    }
+
+    @Test
+    func profileReplyWithMidProseMentionDoesNotForward() async throws {
+        // "ask @coding about X" inside a sentence is conversational, not an
+        // address — it must not fan out.
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "You should ask @coding about the crash."),
+            threads: [defaultThread]
+        )
+        store.availableProfiles = [
+            HermesProfile(id: "default", displayName: "Hermes agent"),
+            HermesProfile(id: "researcher", displayName: "Researcher"),
+            HermesProfile(id: "coding", displayName: "Coding"),
+        ]
+        let researcher = HermesProfile(id: "researcher", displayName: "Researcher")
+        let researcherThreadID = store.threadIDForAgentProfile(researcher)
+
+        await store.sendAgentProfile("dig in", in: researcherThreadID, profile: researcher)
+
+        #expect(store.threads.first { $0.profile.id == "coding" } == nil)
+    }
+
+    @Test
+    func lineLeadingRouteSpansSkipMidLineMentionsButKeepIndentedOnes() throws {
+        let text = "Summary first.\n@coding fix it, then ping @research\n  @research verify"
+        let spans = AgentMentionRouteParser.routeSpans(
+            in: text,
+            aliasGroups: [["coding"], ["research"]],
+            requireLineLeading: true
+        )
+        #expect(spans.map(\.groupIndex) == [0, 1])
+        // Mid-line "@research" stays inside coding's segment; the indented
+        // line-leading one routes.
+        #expect(spans.first?.message == "fix it, then ping @research")
+        #expect(spans.last?.message == "verify")
+    }
+
+    @Test
+    func forwardedAgentReplyIsNotReForwarded() async throws {
+        // Single-hop guarantee: the forwarded agent's own reply (which itself
+        // leads with `@research`) must NOT route again — otherwise research would
+        // receive a second prompt.
+        let defaultThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(
+            agentClient: StubHermesAgentClient(reply: "@research go"),
+            threads: [defaultThread]
+        )
+        store.availableProfiles = [
+            HermesProfile(id: "default", displayName: "Hermes agent"),
+            HermesProfile(id: "research", displayName: "Research"),
+        ]
+
+        await store.send("kick off")
+
+        let research = try #require(store.threads.first { $0.profile.id == "research" })
+        #expect(research.messages.filter { $0.role == .user }.map(\.content) == ["go"])
+    }
+
+    @Test
+    func routingSkillStateReflectsInstalledSkillList() {
+        let store = ChatStore(agentClient: StubHermesAgentClient(reply: "ok"))
+        let name = ChatStore.agentRoutingSkillName
+
+        // Not loaded yet → unknown.
+        #expect(store.routingSkillState(named: name) == .unknown)
+
+        // Loaded without the skill → not installed.
+        store.skillListState = .loaded([
+            HermesInstalledSkill(id: "research", name: "research", category: "local", source: "local", trust: "local", status: "enabled"),
+        ])
+        #expect(store.routingSkillState(named: name) == .notInstalled)
+
+        // Present + enabled.
+        store.skillListState = .loaded([
+            HermesInstalledSkill(id: "ar", name: "agent-routing", category: "local", source: "local", trust: "local", status: "enabled"),
+        ])
+        #expect(store.routingSkillState(named: name) == .installed(enabled: true))
+
+        // Present + disabled (name match is case-insensitive).
+        store.skillListState = .loaded([
+            HermesInstalledSkill(id: "ar", name: "Agent-Routing", category: "local", source: "local", trust: "local", status: "disabled"),
+        ])
+        #expect(store.routingSkillState(named: name) == .installed(enabled: false))
+
+        // A second managed skill is tracked independently.
+        store.skillListState = .loaded([
+            HermesInstalledSkill(id: "dr", name: "deck-routing", category: "local", source: "local", trust: "local", status: "enabled"),
+        ])
+        #expect(store.routingSkillState(named: ChatStore.deckRoutingSkillName) == .installed(enabled: true))
+        #expect(store.routingSkillState(named: ChatStore.agentRoutingSkillName) == .notInstalled)
     }
 
     @Test
@@ -450,7 +622,8 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
         let mainMessages = try #require(store.thread(id: originalSelectedThreadID)?.messages)
         #expect(mainMessages.map(\.role) == [.user, .assistant])
         #expect(mainMessages.first?.content == "@codex refactor this")
-        #expect(mainMessages.last?.content == "Codex:\n\ncodex ok")
+        #expect(mainMessages.last?.content == "codex ok")
+        #expect(mainMessages.last?.agentReplyName == "Codex")
 
         let codexThread = try #require(store.threads.first { $0.profile.id == "acp:codex" })
         #expect(codexThread.messages.first?.content == "refactor this")
@@ -526,7 +699,8 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
 
         let mainMessages = try #require(store.thread(id: sourceID)?.messages)
         #expect(mainMessages.map(\.role) == [.user, .assistant])
-        #expect(mainMessages.last?.content == "Codex:\n\nhello world")
+        #expect(mainMessages.last?.content == "hello world")
+        #expect(mainMessages.last?.agentReplyName == "Codex")
     }
 
     @Test
@@ -604,7 +778,32 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
         #expect(ExternalAgentReplyAttribution.parse("Claude Code:\n\nDone")?.source == .claude)
         #expect(ExternalAgentReplyAttribution.parse("Codex:\n\nDone")?.source == .codex)
         #expect(ExternalAgentReplyAttribution.parse("Gemini (Antigravity):\n\nDone")?.source == .gemini)
+        #expect(ExternalAgentReplyAttribution.parse("Gemini:\n\nDone")?.source == .gemini)
+
+        // Anything that is not a known external brand must NOT be read as an
+        // attribution from content alone — Hermes-profile echoes carry their name
+        // out-of-band via `ChatMessage.agentReplyName` instead. This is the
+        // regression guard against ordinary prose like "Summary:\n\n…" being
+        // swallowed into an attribution pill.
         #expect(ExternalAgentReplyAttribution.parse("Research Agent:\n\nDone") == nil)
+        #expect(ExternalAgentReplyAttribution.parse("Summary:\n\nbody") == nil)
+        #expect(ExternalAgentReplyAttribution.parse("Note:\n\nbody") == nil)
+        #expect(ExternalAgentReplyAttribution.parse("# Heading:\n\nbody") == nil)
+    }
+
+    @Test
+    func equalLengthAliasesResolveDeterministicallyToEarlierGroup() throws {
+        // Two groups share the same-length alias "codex" (group 0 = external,
+        // group 1 = a Hermes profile). `sort` is not stable, so without an
+        // explicit group tiebreak the winner would be undefined — assert the
+        // earlier (external) group wins every time.
+        let spans = AgentMentionRouteParser.routeSpans(
+            in: "@codex do it",
+            aliasGroups: [["codex"], ["codex"]]
+        )
+        #expect(spans.count == 1)
+        #expect(spans.first?.groupIndex == 0)
+        #expect(spans.first?.message == "do it")
     }
 
     @Test

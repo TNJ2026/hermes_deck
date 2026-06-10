@@ -81,6 +81,11 @@ actor LocalHermesGatewayProvider: HermesGatewayProvider {
             ? rootURL
             : rootURL.appendingPathComponent("profiles").appendingPathComponent(id)
         environment["HERMES_HOME"] = home.path(percentEncoded: false)
+        // Marks a gateway *started by the Deck* so its agent can tell it is being
+        // rendered live in the Deck UI (where the `deck-routing` skill's
+        // reply-with-@target convention works). Absent when the Deck attaches to
+        // a gateway started elsewhere.
+        environment["HERMES_DECK"] = "1"
         return environment
     }
 }

@@ -18,6 +18,12 @@ actor AgyClient: HermesAgentClient {
         return HermesChatResponse(content: output.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    // @concurrent on both helpers: with the project's MainActor default
+    // isolation these statics would otherwise run on the main actor, and the
+    // blocking pipe reads / waitUntilExit would freeze the UI for the whole
+    // CLI turn (Task.detached alone doesn't help — awaiting a MainActor
+    // function hops right back).
+    @concurrent
     private static func run(arguments: [String], workingDirectory: URL) async throws -> String {
         let processBox = AgentChildProcessBox()
         let task = Task.detached(priority: .userInitiated) {
@@ -35,6 +41,7 @@ actor AgyClient: HermesAgentClient {
         }
     }
 
+    @concurrent
     private static func runProcess(
         arguments: [String],
         workingDirectory: URL,

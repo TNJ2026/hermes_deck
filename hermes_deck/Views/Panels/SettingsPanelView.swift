@@ -52,7 +52,7 @@ struct SettingsPanelView: View {
                 Picker("Language", selection: $speechLocaleIdentifier) {
                     Text("Follow System").tag("")
                     ForEach(SpeechLanguageSettings.supportedLocaleIdentifiers, id: \.self) { identifier in
-                        Text(SpeechLanguageSettings.displayName(for: identifier)).tag(identifier)
+                        Text(SpeechLanguageSettings.displayName(for: identifier)).lineLimit(1).tag(identifier)
                     }
                 }
                 .labelsHidden()

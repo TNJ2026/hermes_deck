@@ -552,6 +552,28 @@ private struct MarkdownTableCell: View {
     }
 }
 
+/// Matches a bare `@mention` token — a profile id or `claude`/`codex`/`gemini`.
+/// The lookbehind keeps `you@host.com` and `a@b` from matching.
+private let markdownMentionRegex = try? NSRegularExpression(pattern: "(?<![\\w@])@[A-Za-z0-9_-]+")
+
+/// Tints bare `@mention` tokens blue while leaving all other styling intact.
+/// Applied to plain-text Markdown runs so the highlight shows in user prompts
+/// and assistant replies alike (the previous user-only `MentionHighlightedText`
+/// is folded in here).
+private func markdownHighlightingMentions(_ attr: AttributedString) -> AttributedString {
+    guard let regex = markdownMentionRegex else { return attr }
+    let plain = String(attr.characters)
+    guard !plain.isEmpty else { return attr }
+    var result = attr
+    let ns = plain as NSString
+    for match in regex.matches(in: plain, range: NSRange(location: 0, length: ns.length)) {
+        guard let strRange = Range(match.range, in: plain),
+              let attrRange = Range(strRange, in: result) else { continue }
+        result[attrRange].foregroundColor = .blue
+    }
+    return result
+}
+
 private func markdownAttributedSegment(for run: MarkdownInline, isHeader: Bool) -> AttributedString {
     var segment = AttributedString()
     switch run {
@@ -562,6 +584,7 @@ private func markdownAttributedSegment(for run: MarkdownInline, isHeader: Bool) 
             segment = AttributedString(text)
         }
         segment.font = markdownEmphasizedFont(base: .body, emphasis: isHeader ? emphasis.union(.bold) : emphasis)
+        segment = markdownHighlightingMentions(segment)
     case .inlineCode(let code, let emphasis):
         var codeSegment = AttributedString(code)
         codeSegment.font = markdownEmphasizedFont(base: .system(.body, design: .monospaced), emphasis: isHeader ? emphasis.union(.bold) : emphasis)
@@ -954,34 +977,13 @@ enum FilePathLink {
         return URL(string: "\(scheme):\(encoded)")
     }
 
-    /// File extensions that make a bare `name.ext` token (no slash) read as a
-    /// path. Kept tight so prose like "e.g.", "i.e.", "example.com", or "1.0"
-    /// is not mistaken for a file.
-    private static let fileExtensions: Set<String> = [
-        "swift", "py", "js", "ts", "tsx", "jsx", "mjs", "java", "kt", "go", "rs",
-        "c", "h", "m", "mm", "cpp", "cc", "cxx", "hpp", "rb", "php", "pl", "lua",
-        "sh", "bash", "zsh", "fish", "json", "yaml", "yml", "toml", "xml", "html",
-        "css", "scss", "less", "md", "markdown", "txt", "log", "plist", "lock",
-        "gradle", "cfg", "ini", "env", "sql", "csv", "tsv", "proto", "graphql",
-        "png", "jpg", "jpeg", "gif", "svg", "webp", "pdf", "zip", "tar", "gz",
-        "swiftpm", "xcodeproj", "xcworkspace", "entitlements", "storyboard", "xib",
-    ]
-
-    /// Heuristic: absolute (`/…`), home (`~`, `~/…`), explicit relative
-    /// (`./…`, `../…`), any token containing a slash, or a bare `name.<known-ext>`.
+    /// Heuristic: only absolute (`/…`) or home (`~`, `~/…`) tokens are treated as
+    /// file paths. Relative tokens (`./`, `../`), mid-string slashes, and bare
+    /// `name.ext` are intentionally ignored, so only clearly rooted paths become
+    /// links and ordinary prose never does.
     static func isLikelyPath(_ string: String) -> Bool {
         guard !string.isEmpty, !string.contains("://"), !string.contains(" ") else { return false }
-        if string.hasPrefix("/") || string == "~" || string.hasPrefix("~/")
-            || string.hasPrefix("./") || string.hasPrefix("../") {
-            return true
-        }
-        if string.contains("/") { return true }
-        // Bare filename: only a recognized file extension counts as a path.
-        if let dot = string.lastIndex(of: "."), dot != string.startIndex, dot != string.index(before: string.endIndex) {
-            let ext = string[string.index(after: dot)...].lowercased()
-            return fileExtensions.contains(ext)
-        }
-        return false
+        return string.hasPrefix("/") || string == "~" || string.hasPrefix("~/")
     }
 
     /// Resolves the raw path (expanding `~` and relative paths against

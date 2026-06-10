@@ -27,6 +27,10 @@ struct ComposerView: View {
     @State private var mentionPopupHeight: CGFloat = 0
     @State private var slashSelectedIndex = 0
     @State private var suppressedSlashQuery: String?
+    @State private var textHeight: CGFloat = 24
+    /// Candidate ids already @-mentioned in the draft; recomputed only when
+    /// `draft` changes (not on every popup re-render).
+    @State private var mentionedCandidateCache: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -58,13 +62,15 @@ struct ComposerView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                TextField("Ask anything", text: $draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...3)
-                    .font(.system(size: 14.5))
-                    .frame(minHeight: 24, alignment: .topLeading)
-                    .onSubmit(send)
-                    .onKeyPress { press in handleComposerKey(press) }
+                MentionTextView(
+                    text: $draft,
+                    placeholder: "Ask anything",
+                    aliases: mentionAliases,
+                    onSubmit: send,
+                    onKeyCommand: handleComposerCommand,
+                    onHeightChange: { textHeight = $0 }
+                )
+                .frame(height: textHeight)
 
                 HStack(alignment: .center, spacing: 4) {
                     if speechTranscriber.isRecording {
@@ -126,7 +132,7 @@ struct ComposerView: View {
                     }
                 }
             }
-            .padding(.top, 16)
+            .padding(.top, 8)
             .padding(.bottom, 10)
             .padding(.leading, 14)
             .padding(.trailing, 12)
@@ -176,6 +182,9 @@ struct ComposerView: View {
         .onChange(of: speechTranscriber.transcript) { _, newValue in
             updateDraft(withTranscript: newValue)
         }
+        .onChange(of: draft) { _, _ in
+            mentionedCandidateCache = computeMentionedCandidateIDs()
+        }
         .onDisappear {
             speechTranscriber.stopRecording()
         }
@@ -184,14 +193,16 @@ struct ComposerView: View {
     // MARK: - @ mention autocomplete
 
     private var mentionCandidates: [MentionCandidate] {
-        let hermes = store.agentProfiles.map { profile in
-            MentionCandidate(
-                id: profile.id,
-                label: profile.displayName,
-                subtitle: store.profileMainModels[profile.id] ?? "Hermes profile",
-                alias: profile.id
-            )
-        }
+        let hermes = store.agentProfiles
+            .filter { $0.id != store.selectedProfile.id }
+            .map { profile in
+                MentionCandidate(
+                    id: profile.id,
+                    label: profile.displayName,
+                    subtitle: store.profileMainModels[profile.id] ?? "Hermes profile",
+                    alias: profile.id
+                )
+            }
         let external = store.externalAgentMentionTargets.map { target in
             MentionCandidate(
                 id: target.profile.id,
@@ -202,6 +213,8 @@ struct ComposerView: View {
         }
         return hermes + external
     }
+
+    private var mentionAliases: [String] { mentionCandidates.map(\.alias) }
 
     private static func backendLabel(_ backend: AgentBackend) -> String {
         switch backend {
@@ -220,10 +233,36 @@ struct ComposerView: View {
     }
 
     private func filteredCandidates(for query: String) -> [MentionCandidate] {
-        guard !query.isEmpty else { return mentionCandidates }
-        return mentionCandidates.filter {
+        let available = mentionCandidates.filter { !mentionedCandidateCache.contains($0.id) }
+        guard !query.isEmpty else { return available }
+        return available.filter {
             $0.alias.lowercased().contains(query) || $0.label.lowercased().contains(query)
         }
+    }
+
+    /// Candidate ids already @-mentioned in the draft (excluding the mention
+    /// being typed right now) — so each agent can only be mentioned once.
+    /// Cached in `mentionedCandidateCache`; recomputed via `onChange(draft)`.
+    private func computeMentionedCandidateIDs() -> Set<String> {
+        var text = draft
+        if let mention = activeMention {
+            text.removeSubrange(mention.range)
+        }
+        var ids: Set<String> = []
+        for target in store.externalAgentMentionTargets {
+            if !AgentMentionRouteParser.routeSpans(in: text, aliasGroups: [target.aliases]).isEmpty {
+                ids.insert(target.profile.id)
+            }
+        }
+        for profile in store.agentProfiles {
+            let aliases = [profile.id, profile.displayName]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if !AgentMentionRouteParser.routeSpans(in: text, aliasGroups: [aliases]).isEmpty {
+                ids.insert(profile.id)
+            }
+        }
+        return ids
     }
 
     private func insertMention(_ candidate: MentionCandidate, replacing range: Range<String.Index>) {
@@ -232,27 +271,25 @@ struct ComposerView: View {
         mentionSelectedIndex = 0
     }
 
-    private func handleMentionKey(_ press: KeyPress) -> KeyPress.Result {
-        guard let mention = activeMention else { return .ignored }
+    private func handleMentionCommand(_ command: MentionKeyCommand) -> Bool {
+        guard let mention = activeMention else { return false }
         let candidates = filteredCandidates(for: mention.query)
-        guard !candidates.isEmpty else { return .ignored }
+        guard !candidates.isEmpty else { return false }
 
-        switch press.key {
-        case .downArrow:
+        switch command {
+        case .moveDown:
             mentionSelectedIndex = (mentionSelectedIndex + 1) % candidates.count
-            return .handled
-        case .upArrow:
+            return true
+        case .moveUp:
             mentionSelectedIndex = (mentionSelectedIndex - 1 + candidates.count) % candidates.count
-            return .handled
-        case .return, .tab:
+            return true
+        case .confirm:
             let index = min(max(mentionSelectedIndex, 0), candidates.count - 1)
             insertMention(candidates[index], replacing: mention.range)
-            return .handled
-        case .escape:
+            return true
+        case .dismiss:
             suppressedMentionQuery = mention.query
-            return .handled
-        default:
-            return .ignored
+            return true
         }
     }
 
@@ -276,39 +313,50 @@ struct ComposerView: View {
         slashSelectedIndex = 0
     }
 
-    private func handleSlashKey(_ press: KeyPress) -> KeyPress.Result {
-        guard let slash = activeSlash else { return .ignored }
+    private func handleSlashCommand(_ command: MentionKeyCommand) -> Bool {
+        guard let slash = activeSlash else { return false }
         let commands = filteredSlashCommands(for: slash.query)
-        guard !commands.isEmpty else { return .ignored }
+        guard !commands.isEmpty else { return false }
 
-        switch press.key {
-        case .downArrow:
+        switch command {
+        case .moveDown:
             slashSelectedIndex = (slashSelectedIndex + 1) % commands.count
-            return .handled
-        case .upArrow:
+            return true
+        case .moveUp:
             slashSelectedIndex = (slashSelectedIndex - 1 + commands.count) % commands.count
-            return .handled
-        case .return, .tab:
+            return true
+        case .confirm:
             let index = min(max(slashSelectedIndex, 0), commands.count - 1)
             insertSlash(commands[index], replacing: slash.range)
-            return .handled
-        case .escape:
+            return true
+        case .dismiss:
             suppressedSlashQuery = slash.query
-            return .handled
-        default:
-            return .ignored
+            return true
         }
     }
 
-    /// Routes keys to whichever autocomplete popup is active (mention or slash).
-    private func handleComposerKey(_ press: KeyPress) -> KeyPress.Result {
-        if activeMention != nil { return handleMentionKey(press) }
-        if activeSlash != nil { return handleSlashKey(press) }
-        return .ignored
+    /// Routes a key to whichever autocomplete popup is active (mention or slash).
+    private func handleComposerCommand(_ command: MentionKeyCommand) -> Bool {
+        if activeMention != nil { return handleMentionCommand(command) }
+        if activeSlash != nil { return handleSlashCommand(command) }
+        return false
     }
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && currentSendState != .sending
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        currentSendState != .sending &&
+        hasContentBeyondMentions
+    }
+
+    private var hasContentBeyondMentions: Bool {
+        let ranges = MentionTextView.mentionRanges(in: draft, sortedAliases: mentionAliases.sorted { $0.count > $1.count })
+        var remaining = draft
+        for range in ranges.reversed() {
+            if let strRange = Range(range, in: remaining) {
+                remaining.removeSubrange(strRange)
+            }
+        }
+        return !remaining.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var isSending: Bool {

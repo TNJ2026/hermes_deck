@@ -913,7 +913,7 @@ private struct TUIJSONError: Decodable {
     var message: String
 }
 
-enum TUIJSONValue: Codable, Equatable, Sendable {
+nonisolated enum TUIJSONValue: Codable, Equatable, Sendable {
     case string(String)
     case number(Double)
     case bool(Bool)

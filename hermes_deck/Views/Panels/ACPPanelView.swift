@@ -59,6 +59,11 @@ struct AgentPanelBody: View {
                 Spacer(minLength: 0)
                 AgentPanelWelcomeView(sendBackend: sendBackend)
                     .padding(.bottom, 18)
+                composer
+                    .frame(maxWidth: 720)
+                    .frame(maxWidth: .infinity)
+                Spacer(minLength: 0)
+                Spacer(minLength: 0)
             } else {
                 ChatDetailView(
                     store: store,
@@ -73,29 +78,15 @@ struct AgentPanelBody: View {
                     sendBackend: sendBackend,
                     onFileImportRequested: onFileImportRequested
                 )
-            }
-
-            if showsComposer {
-                AgentComposerView(
-                    draft: $draft,
-                    sendState: store.sendState(forAgentThreadID: threadID),
-                    presentation: .floating,
-                    permissionRequest: store.pendingPermissionRequest(forAgentThreadID: threadID),
-                    clarificationRequest: store.pendingClarificationRequest(forAgentThreadID: threadID),
-                    answerPermission: { store.answerPermission(at: $0, forAgentThreadID: threadID) },
-                    dismissPermissionRequest: { store.dismissPermissionRequest(forAgentThreadID: threadID) },
-                    dismissClarificationRequest: { store.dismissClarificationRequest(forAgentThreadID: threadID) },
-                    sendAction: send
-                )
-                .frame(maxWidth: isEmpty ? 720 : .infinity)
-                .frame(maxWidth: .infinity)
-                .id("agent-composer")
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
-            if isEmpty {
-                Spacer(minLength: 0)
-                Spacer(minLength: 0)
+                // The composer overlays the message list instead of stacking
+                // under it, so hover show/hide doesn't resize the list.
+                .overlay(alignment: .bottom) {
+                    if showsComposer {
+                        composer
+                            .frame(maxWidth: .infinity)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -104,6 +95,21 @@ struct AgentPanelBody: View {
             withAnimation(.easeInOut(duration: 0.2)) { isComposerVisible = hovering }
             // Test compatibility: isComposerVisible = $0
         }
+    }
+
+    private var composer: some View {
+        AgentComposerView(
+            draft: $draft,
+            sendState: store.sendState(forAgentThreadID: threadID),
+            presentation: .floating,
+            permissionRequest: store.pendingPermissionRequest(forAgentThreadID: threadID),
+            clarificationRequest: store.pendingClarificationRequest(forAgentThreadID: threadID),
+            answerPermission: { store.answerPermission(at: $0, forAgentThreadID: threadID) },
+            dismissPermissionRequest: { store.dismissPermissionRequest(forAgentThreadID: threadID) },
+            dismissClarificationRequest: { store.dismissClarificationRequest(forAgentThreadID: threadID) },
+            sendAction: send
+        )
+        .id("agent-composer")
     }
 
     private var isEmpty: Bool {
@@ -130,7 +136,7 @@ struct AgentPanelBody: View {
         switch sendBackend {
         case .acp(let agent): sourceName = agent.displayName
         case .claudeCLI: sourceName = "Claude Code"
-        case .agy: sourceName = "Gemini (Antigravity)"
+        case .agy: sourceName = "Gemini"
         case .hermes: sourceName = "Hermes"
         }
         let routeResult = await store.routePromptIfAllowed(

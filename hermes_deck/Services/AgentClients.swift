@@ -1,6 +1,6 @@
 import Foundation
 
-final class AgentChildProcessBox: @unchecked Sendable {
+nonisolated final class AgentChildProcessBox: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
 
@@ -68,7 +68,7 @@ struct StubStreamingHermesAgentClient: HermesAgentClient {
 }
 
 
-private struct Payload: Encodable {
+private nonisolated struct Payload: Encodable {
     var profileID: String
     var messages: [MessagePayload]
     var attachments: [AttachmentPayload]

@@ -1,7 +1,7 @@
 import Foundation
 import Yams
 
-struct AgentPromptEnvelope: Equatable, Sendable {
+nonisolated struct AgentPromptEnvelope: Equatable, Sendable {
     var text: String
     var attachments: [Attachment]
     var sourceProfileName: String?
@@ -27,7 +27,7 @@ struct AgentPromptEnvelope: Equatable, Sendable {
     }
 }
 
-struct HermesChatRequest: Sendable {
+nonisolated struct HermesChatRequest: Sendable {
     var conversationID: UUID
     var profile: HermesProfile
     var messages: [ChatMessage]
@@ -85,7 +85,7 @@ struct HermesChatRequest: Sendable {
     }
 }
 
-struct HermesChatResponse: Decodable, Sendable {
+nonisolated struct HermesChatResponse: Decodable, Sendable {
     var content: String
 }
 
