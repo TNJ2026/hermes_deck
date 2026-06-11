@@ -49,6 +49,16 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
     }
 
     @Test
+    func rightSidebarFreezesChatLayoutWidthWhileResizing() throws {
+        let source = try sourceFile("hermes_deck/Views/Layout/RightSidebarView.swift")
+
+        #expect(source.contains(".frame(width: contentLayoutWidth, alignment: .topLeading)"))
+        #expect(source.contains(".frame(width: displayedWidth, alignment: .topLeading)"))
+        #expect(source.contains("liveWidth != nil && selectedPanelItem.containsChatDetailView"))
+        #expect(source.contains("case .agents, .claude, .codex, .gemini:"))
+    }
+
+    @Test
     func jobsPanelHasOwnProfilePickerIncludingDefault() throws {
         let rightSidebarSource = try sourceFile("hermes_deck/Views/Layout/RightSidebarView.swift")
         let jobsSource = try sourceFile("hermes_deck/Views/Panels/AgentJobsPanelViews.swift")
@@ -200,6 +210,18 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
         #expect(agentsSource.contains("showsComposer: true"))
         #expect(!agentsSource.contains("struct AgentProfileRow: View"))
         #expect(!agentsSource.contains("store.setProfile"))
+    }
+
+    @Test
+    func agentsSplitClearsBottomPaneWhenTopSelectsBottomProfile() throws {
+        let source = try sourceFile("hermes_deck/Views/Panels/AgentJobsPanelViews.swift")
+
+        #expect(source.contains("let matchesBottomPane = isSplit && profile.id == secondAgentProfile?.id"))
+        #expect(source.contains("private func clearBottomPaneSelection()"))
+        #expect(source.contains("secondAgentProfile = nil"))
+        #expect(source.contains("secondAgentThreadID = nil"))
+        #expect(source.contains("secondDraft = \"\""))
+        #expect(source.contains("if let other = bottomPaneProfiles.first"))
     }
 
     @Test

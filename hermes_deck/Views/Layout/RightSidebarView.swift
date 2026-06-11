@@ -89,8 +89,10 @@ struct RightSidebarView: View {
                     }
                 }
                 .padding(16)
-                .frame(width: displayedWidth, alignment: .topLeading)
+                .frame(width: contentLayoutWidth, alignment: .topLeading)
                 .frame(maxHeight: .infinity, alignment: .topLeading)
+                .frame(width: displayedWidth, alignment: .topLeading)
+                .clipped()
 
                 Divider()
             }
@@ -167,6 +169,19 @@ struct RightSidebarView: View {
         min(liveWidth ?? width, max(280, maxWidth))
     }
 
+    /// While resizing a chat-bearing right panel, keep the inner content at the
+    /// pre-drag width. The outer sidebar still follows the cursor, but Markdown
+    /// in ChatDetailView does not reflow on every drag tick; it re-renders once
+    /// the committed `width` updates at the end of the drag.
+    private var contentLayoutWidth: CGFloat {
+        guard isResizingChatPanel else { return displayedWidth }
+        return min(dragStartWidth ?? width, max(280, maxWidth))
+    }
+
+    private var isResizingChatPanel: Bool {
+        liveWidth != nil && selectedPanelItem.containsChatDetailView
+    }
+
     private func clampedWidth(_ width: CGFloat) -> CGFloat {
         let upper = max(280, maxWidth)
         return min(max(width, 280), upper)
@@ -240,6 +255,15 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
 
     var id: String {
         rawValue
+    }
+
+    var containsChatDetailView: Bool {
+        switch self {
+        case .agents, .claude, .codex, .gemini:
+            true
+        case .task, .kanban, .jobs, .settings:
+            false
+        }
     }
 
     /// The panel that hosts the given external-agent backend, if any.

@@ -118,13 +118,17 @@ struct AgentsPanelView: View {
     private func closePaneMatchingLeftProfile(_ leftID: String) {
         if isSplit, secondAgentProfile?.id == leftID {
             isSplit = false
+            clearBottomPaneSelection()
             return
         }
         guard selectedAgentProfile?.id == leftID else { return }
         if isSplit {
-            selectedAgentProfile = secondAgentProfile
-            selectedAgentThreadID = secondAgentThreadID
+            let promotedProfile = secondAgentProfile
+            let promotedThreadID = secondAgentThreadID
+            selectedAgentProfile = promotedProfile
+            selectedAgentThreadID = promotedThreadID
             isSplit = false
+            clearBottomPaneSelection()
         } else {
             selectedAgentProfile = nil
             selectedAgentThreadID = nil
@@ -132,12 +136,21 @@ struct AgentsPanelView: View {
     }
 
     private func select(_ profile: HermesProfile) {
+        let matchesBottomPane = isSplit && profile.id == secondAgentProfile?.id
         selectedAgentProfile = profile
         selectedAgentThreadID = store.threadIDForAgentProfile(profile)
-        // Top switched onto the bottom pane's profile: collapse the split.
-        if isSplit, profile.id == secondAgentProfile?.id {
+        // Top switched onto the bottom pane's profile: collapse the split and
+        // forget the bottom selection so the next split chooses a fresh profile.
+        if matchesBottomPane {
             isSplit = false
+            clearBottomPaneSelection()
         }
+    }
+
+    private func clearBottomPaneSelection() {
+        secondAgentProfile = nil
+        secondAgentThreadID = nil
+        secondDraft = ""
     }
 
     /// Profiles selectable on the right — all profiles (default "Hermes agent"
@@ -240,7 +253,7 @@ struct AgentsPanelView: View {
         isSplit.toggle()
         guard isSplit else { return }
         if secondAgentProfile == nil || secondAgentProfile?.id == selectedAgentProfile?.id {
-            if let other = store.agentProfiles.first(where: { $0.id != selectedAgentProfile?.id }) {
+            if let other = bottomPaneProfiles.first {
                 secondAgentProfile = other
                 secondAgentThreadID = store.threadIDForAgentProfile(other)
             }
