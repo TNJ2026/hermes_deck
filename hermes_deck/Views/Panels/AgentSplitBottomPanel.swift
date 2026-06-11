@@ -23,7 +23,7 @@ struct AgentSplitBottomPanel: View {
                 Spacer(minLength: 0)
             }
             .padding(.top, 12)
-            .padding(.bottom, 6)
+            .padding(.bottom, 12)
 
             Divider()
 
