@@ -55,7 +55,7 @@ struct AgentSplitBottomPanel: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
-                .frame(maxWidth: 150)
+                .frame(maxWidth: 150, alignment: .trailing)
                 .onChange(of: profile) { _, newValue in
                     guard let newValue else { return }
                     threadID = store.threadIDForAgentProfile(newValue)
