@@ -548,7 +548,6 @@ private actor TUIGatewayRPCClient {
 
     private func startIfNeeded() throws {
         guard !isStarted else { return }
-        isStarted = true
 
         // Stdout chunks are funneled through one per-launch FIFO stream consumed
         // by a single task. Spawning a Task per readability callback gives no
@@ -588,6 +587,11 @@ private actor TUIGatewayRPCClient {
             chunkContinuation.finish()
             throw error
         }
+        // Only after a successful launch (mirrors ACPConnection): a failed run
+        // leaves isStarted false, so the next call retries the launch and gets
+        // a thrown error instead of registering a pending reply that nothing
+        // will ever resolve.
+        isStarted = true
     }
 
     private var buffer = Data()
