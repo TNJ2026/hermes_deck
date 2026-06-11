@@ -209,11 +209,13 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
         let panelBodyEnd = try #require(source[panelBodyStart...].range(of: "struct ACPPanelView: View")?.lowerBound)
         let panelBodySource = String(source[panelBodyStart..<panelBodyEnd])
 
-        // The composer is always visible — no hover show/hide.
+        // Same composer as the Agents panel, always visible, no attachments,
+        // with the panel's branded welcome above the empty-thread composer.
         #expect(!panelBodySource.contains("isComposerVisible"))
         #expect(!panelBodySource.contains(".onHover"))
-        #expect(panelBodySource.contains("AgentPanelWelcomeView(sendBackend: sendBackend)"))
-        #expect(panelBodySource.contains("AgentComposerView("))
+        #expect(panelBodySource.contains("usesAgentsComposer: true"))
+        #expect(panelBodySource.contains("composerShowsAttachmentButton: false"))
+        #expect(panelBodySource.contains("emptyStateHeader: AnyView(AgentPanelWelcomeView(sendBackend: sendBackend))"))
     }
 
     @Test

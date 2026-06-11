@@ -41,9 +41,9 @@ struct AgentWorkingDirectoryButton: View {
     }
 }
 
-/// Shared body for the external agent panels: the message list (read-only
-/// `ChatDetailView`) plus `AgentComposerView`. When the thread has no messages
-/// the composer is centered, like the main chat's empty state.
+/// Shared body for the external agent panels: the same inline
+/// `AgentsComposerView` chat the Agents panel uses, minus the attachment
+/// button, with the panel's branded welcome above the empty-thread composer.
 struct AgentPanelBody: View {
     @Bindable var store: ChatStore
     let threadID: UUID
@@ -53,82 +53,23 @@ struct AgentPanelBody: View {
     let onFileImportRequested: (UUID?) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            if isEmpty {
-                Spacer(minLength: 0)
-                AgentPanelWelcomeView(sendBackend: sendBackend)
-                    .padding(.bottom, 18)
-                composer
-                    .frame(maxWidth: 720)
-                    .frame(maxWidth: .infinity)
-                Spacer(minLength: 0)
-                Spacer(minLength: 0)
-            } else {
-                ChatDetailView(
-                    store: store,
-                    draft: $draft,
-                    isFileImporterPresented: $isFileImporterPresented,
-                    composerPresentation: .inline,
-                    showsComposer: false,
-                    messageHorizontalInset: 8,
-                    assistantTrailingInset: 12,
-                    threadID: threadID,
-                    sendProfile: store.thread(id: threadID)?.profile,
-                    sendState: store.sendState(forAgentThreadID: threadID),
-                    sendBackend: sendBackend,
-                    onFileImportRequested: onFileImportRequested
-                )
-
-                composer
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var composer: some View {
-        AgentComposerView(
+        ChatDetailView(
+            store: store,
             draft: $draft,
+            isFileImporterPresented: $isFileImporterPresented,
+            composerPresentation: .inline,
+            showsComposer: true,
+            messageHorizontalInset: 8,
+            assistantTrailingInset: 12,
+            usesAgentsComposer: true,
+            composerShowsAttachmentButton: false,
+            emptyStateHeader: AnyView(AgentPanelWelcomeView(sendBackend: sendBackend)),
+            threadID: threadID,
+            sendProfile: store.thread(id: threadID)?.profile,
             sendState: store.sendState(forAgentThreadID: threadID),
-            presentation: .floating,
-            permissionRequest: store.pendingPermissionRequest(forAgentThreadID: threadID),
-            clarificationRequest: store.pendingClarificationRequest(forAgentThreadID: threadID),
-            answerPermission: { store.answerPermission(at: $0, forAgentThreadID: threadID) },
-            dismissPermissionRequest: { store.dismissPermissionRequest(forAgentThreadID: threadID) },
-            dismissClarificationRequest: { store.dismissClarificationRequest(forAgentThreadID: threadID) },
-            sendAction: send
+            sendBackend: sendBackend,
+            onFileImportRequested: onFileImportRequested
         )
-        .id("agent-composer")
-    }
-
-    private var isEmpty: Bool {
-        (store.thread(id: threadID)?.messages.isEmpty ?? true)
-            && store.sendState(forAgentThreadID: threadID) != .sending
-    }
-
-    private func send(_ text: String) async {
-        let sourceName: String
-        switch sendBackend {
-        case .acp(let agent): sourceName = agent.displayName
-        case .claudeCLI: sourceName = "Claude Code"
-        case .agy: sourceName = "Gemini"
-        case .hermes: sourceName = "Hermes"
-        }
-        let routeResult = await store.routePromptIfAllowed(
-            text,
-            from: .external(backend: sendBackend, displayName: sourceName),
-            sourceThreadID: threadID,
-            notifiesPanel: false
-        )
-        if routeResult == .routed {
-            return
-        }
-        switch sendBackend {
-        case .acp(let agent): await store.sendToACP(text, agent: agent, threadID: threadID)
-        case .claudeCLI: await store.sendToClaudeCLI(text, threadID: threadID)
-        case .agy: await store.sendToAgy(text, threadID: threadID)
-        case .hermes: break
-        }
     }
 }
 

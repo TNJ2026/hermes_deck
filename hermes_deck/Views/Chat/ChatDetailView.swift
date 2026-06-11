@@ -13,9 +13,14 @@ struct ChatDetailView: View {
     /// bubbles keep their own). The right-sidebar panels pass a tighter value
     /// so agent replies use more of the narrow column.
     var assistantTrailingInset: CGFloat = 80
-    /// The Agents panel opts into the single-line `AgentsComposerView`; the main
-    /// chat and external-agent panels keep the standard `ComposerView`.
+    /// The Agents panel and the external CLI panels opt into the single-line
+    /// `AgentsComposerView`; the main chat keeps the standard `ComposerView`.
     var usesAgentsComposer = false
+    /// External CLI panels hide the agents composer's attachment button.
+    var composerShowsAttachmentButton = true
+    /// Custom header above the centered empty-thread composer (the external
+    /// panels pass their branded welcome); `nil` shows the generic one.
+    var emptyStateHeader: AnyView?
     var threadID: UUID?
     var sendProfile: HermesProfile?
     var sendState: ChatSendState?
@@ -139,7 +144,8 @@ struct ChatDetailView: View {
                 dismissClarificationRequest: dismissClarificationRequest,
                 requestFileImport: requestFileImport,
                 sendAction: send,
-                composerProfileID: sendProfile?.id
+                composerProfileID: sendProfile?.id,
+                showsAttachmentButton: composerShowsAttachmentButton
             )
         } else {
             standardComposerView
@@ -182,17 +188,21 @@ struct ChatDetailView: View {
         VStack(spacing: 0) {
             Spacer()
             VStack(spacing: 18) {
-                VStack(spacing: 8) {
-                    Image(systemName: "bubble.left.and.bubble.right")
-                        .font(.system(size: 30, weight: .light))
-                        .foregroundStyle(.secondary)
-                    Text("Start a new conversation")
-                        .font(.title2.weight(.semibold))
-                    Text("Ask a question or describe a task to get started.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                if let emptyStateHeader {
+                    emptyStateHeader
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.system(size: 30, weight: .light))
+                            .foregroundStyle(.secondary)
+                        Text("Start a new conversation")
+                            .font(.title2.weight(.semibold))
+                        Text("Ask a question or describe a task to get started.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    .multilineTextAlignment(.center)
                 }
-                .multilineTextAlignment(.center)
 
                 composerView
             }

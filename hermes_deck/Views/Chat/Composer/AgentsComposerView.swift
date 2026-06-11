@@ -26,6 +26,9 @@ struct AgentsComposerView: View {
     /// The profile this composer sends as, excluded from the `@mention` list
     /// (no self-mention). `nil` falls back to the main chat's selected profile.
     var composerProfileID: String?
+    /// External CLI panels hide the attachment button (their backends don't
+    /// take file attachments); the Agents panel keeps it.
+    var showsAttachmentButton = true
 
     @State private var sendTask: Task<Void, Never>?
     @State private var speechTranscriber = SpeechTranscriber()
@@ -85,8 +88,10 @@ struct AgentsComposerView: View {
                             .frame(height: 22)
                             .allowsHitTesting(false)
                     } else {
-                        iconButton(systemImage: "paperclip", accessibilityLabel: "Attach") {
-                            requestFileImport()
+                        if showsAttachmentButton {
+                            iconButton(systemImage: "paperclip", accessibilityLabel: "Attach") {
+                                requestFileImport()
+                            }
                         }
 
                         Spacer(minLength: 8)
