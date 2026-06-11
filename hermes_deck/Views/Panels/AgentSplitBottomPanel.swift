@@ -60,7 +60,7 @@ struct AgentSplitBottomPanel: View {
                     guard let newValue else { return }
                     threadID = store.threadIDForAgentProfile(newValue)
                 }
-                .padding(.top, 10)
+                .padding(.top, 8)
             }
         }
     }
