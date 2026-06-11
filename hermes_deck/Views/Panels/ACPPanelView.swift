@@ -51,7 +51,6 @@ struct AgentPanelBody: View {
     @Binding var draft: String
     @Binding var isFileImporterPresented: Bool
     let onFileImportRequested: (UUID?) -> Void
-    @State private var isComposerVisible = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -79,23 +78,12 @@ struct AgentPanelBody: View {
                     sendBackend: sendBackend,
                     onFileImportRequested: onFileImportRequested
                 )
-                // The composer overlays the message list instead of stacking
-                // under it, so hover show/hide doesn't resize the list.
-                .overlay(alignment: .bottom) {
-                    if showsComposer {
-                        composer
-                            .frame(maxWidth: .infinity)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
+
+                composer
+                    .frame(maxWidth: .infinity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.2)) { isComposerVisible = hovering }
-            // Test compatibility: isComposerVisible = $0
-        }
     }
 
     private var composer: some View {
@@ -116,20 +104,6 @@ struct AgentPanelBody: View {
     private var isEmpty: Bool {
         (store.thread(id: threadID)?.messages.isEmpty ?? true)
             && store.sendState(forAgentThreadID: threadID) != .sending
-    }
-
-    private var showsComposer: Bool {
-        isEmpty || isComposerVisible || needsAttention
-    }
-
-    /// Keep the composer on screen — regardless of hover — while a reply is in
-    /// flight or the agent is waiting on a permission / clarification answer, so
-    /// the stop button and those banners stay reachable. Otherwise a mid-turn
-    /// permission prompt hides with the composer and the turn appears stuck.
-    private var needsAttention: Bool {
-        store.sendState(forAgentThreadID: threadID) == .sending
-            || store.pendingPermissionRequest(forAgentThreadID: threadID) != nil
-            || store.pendingClarificationRequest(forAgentThreadID: threadID) != nil
     }
 
     private func send(_ text: String) async {

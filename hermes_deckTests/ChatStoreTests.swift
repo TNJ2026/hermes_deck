@@ -203,19 +203,17 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
     }
 
     @Test
-    func acpPanelsShowComposerForEmptyThreadsOrWhileHovered() throws {
+    func acpPanelsAlwaysShowComposer() throws {
         let source = try sourceFile("hermes_deck/Views/Panels/ACPPanelView.swift")
         let panelBodyStart = try #require(source.range(of: "struct AgentPanelBody: View")?.lowerBound)
         let panelBodyEnd = try #require(source[panelBodyStart...].range(of: "struct ACPPanelView: View")?.lowerBound)
         let panelBodySource = String(source[panelBodyStart..<panelBodyEnd])
 
-        #expect(panelBodySource.contains("@State private var isComposerVisible = false"))
-        #expect(panelBodySource.contains("if showsComposer"))
-        #expect(panelBodySource.contains("isEmpty || isComposerVisible"))
+        // The composer is always visible — no hover show/hide.
+        #expect(!panelBodySource.contains("isComposerVisible"))
+        #expect(!panelBodySource.contains(".onHover"))
         #expect(panelBodySource.contains("AgentPanelWelcomeView(sendBackend: sendBackend)"))
         #expect(panelBodySource.contains("AgentComposerView("))
-        #expect(panelBodySource.contains(".onHover"))
-        #expect(panelBodySource.contains("isComposerVisible = $0"))
     }
 
     @Test
