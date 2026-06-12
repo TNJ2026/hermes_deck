@@ -340,6 +340,36 @@ enum PromptRouteResult: Equatable, Sendable {
     case denied(PromptRouteDenialReason)
 }
 
+/// Framing for the close-the-loop follow-up (`X replied:\n\n<reply>`, sections
+/// joined by `———`), shared by the routing fan-out that writes it and the
+/// bubble view that displays it — so the two cannot drift apart.
+nonisolated enum AgentReplyFraming {
+    static let sectionSeparator = "\n\n———\n\n"
+    static let headerSuffix = " replied:\n\n"
+
+    static func framed(_ replies: [(name: String, reply: String)]) -> String {
+        replies
+            .map { "\($0.name)\(headerSuffix)\($0.reply)" }
+            .joined(separator: sectionSeparator)
+    }
+
+    /// All `<name> replied:` sections of a framed follow-up; `nil` unless every
+    /// section parses (a partial match is treated as ordinary text).
+    static func sections(in content: String) -> [(name: String, reply: String)]? {
+        let parts = content.components(separatedBy: sectionSeparator)
+        let parsed = parts.compactMap { part -> (name: String, reply: String)? in
+            guard let range = part.range(of: headerSuffix) else { return nil }
+            let name = String(part[..<range.lowerBound])
+            guard !name.isEmpty, !name.contains("\n") else { return nil }
+            let reply = String(part[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !reply.isEmpty else { return nil }
+            return (name, reply)
+        }
+        guard !parsed.isEmpty, parsed.count == parts.count else { return nil }
+        return parsed
+    }
+}
+
 enum AgentMentionRouteParser {
     static func parse(_ text: String, profiles: [HermesProfile]) -> AgentMentionRoute? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

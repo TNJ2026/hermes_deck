@@ -749,6 +749,21 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
     }
 
     @Test
+    func agentReplyFramingRoundTripsAndRejectsProse() {
+        let framed = AgentReplyFraming.framed([
+            (name: "Coding", reply: "done"),
+            (name: "Researcher", reply: "sources:\n- a\n- b"),
+        ])
+        let sections = AgentReplyFraming.sections(in: framed)
+        #expect(sections?.map(\.name) == ["Coding", "Researcher"])
+        #expect(sections?.map(\.reply) == ["done", "sources:\n- a\n- b"])
+
+        // Ordinary prose (or a partially matching mix) is not a framed receipt.
+        #expect(AgentReplyFraming.sections(in: "just some text") == nil)
+        #expect(AgentReplyFraming.sections(in: framed + AgentReplyFraming.sectionSeparator + "trailing prose") == nil)
+    }
+
+    @Test
     func concurrentTurnsOnOneThreadSerialize() async throws {
         // One gateway session runs one turn at a time; a second prompt on the
         // same thread must wait out the in-flight turn instead of colliding

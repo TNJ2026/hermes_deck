@@ -138,36 +138,62 @@ enum ExternalAgentAppearance {
     }
 }
 
-/// The close-the-loop follow-up fed back to a source agent (`X replied:`
-/// followed by the routed agent's reply). Only internally flagged messages use
-/// this view; ordinary user prose is never parsed into this shape.
+/// The close-the-loop follow-up fed back to a source agent (`X replied:` per
+/// routed target). Only internally flagged messages use this view; ordinary
+/// user prose is never parsed into this shape.
 ///
-/// Renders as a one-line receipt — the full reply already lives in the routed
-/// agent's own thread, so repeating it here only duplicates a wall of text.
+/// One receipt row per target, collapsed by default — the disclosure triangle
+/// expands that agent's reply in a bubble below the row. The full reply also
+/// lives in the routed agent's own thread.
 struct AgentRepliedContent: View {
-    let name: String
-    let reply: String
+    let sections: [(name: String, reply: String)]
+    @State private var expandedIndices: Set<Int> = []
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "arrow.uturn.backward")
-                .font(.system(size: 11, weight: .semibold))
-            Text("\(name) replied")
-                .font(.system(size: 14, weight: .semibold))
-                .lineLimit(1)
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(sections.enumerated()), id: \.offset) { index, section in
+                VStack(alignment: .leading, spacing: 6) {
+                    Button {
+                        withAnimation(.smooth(duration: 0.15)) {
+                            if expandedIndices.contains(index) {
+                                expandedIndices.remove(index)
+                            } else {
+                                expandedIndices.insert(index)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.uturn.backward")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("\(section.name) replied")
+                                .font(.system(size: 14, weight: .semibold))
+                                .lineLimit(1)
+                            Image(systemName: expandedIndices.contains(index) ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .foregroundStyle(.blue)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    if expandedIndices.contains(index) {
+                        MarkdownView(section.reply)
+                            .padding(10)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(.quaternary)
+                            }
+                    }
+                }
+            }
         }
-        .foregroundStyle(.blue)
     }
 
-    /// Parses `<name> replied:\n\n<reply>`; the name must be a single line.
     static func parse(_ content: String) -> AgentRepliedContent? {
-        let separator = " replied:\n\n"
-        guard let separatorRange = content.range(of: separator) else { return nil }
-        let name = String(content[..<separatorRange.lowerBound])
-        guard !name.isEmpty, !name.contains("\n") else { return nil }
-        let reply = String(content[separatorRange.upperBound...])
-        guard !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        return AgentRepliedContent(name: name, reply: reply)
+        guard let sections = AgentReplyFraming.sections(in: content) else { return nil }
+        return AgentRepliedContent(sections: sections)
     }
 }
 

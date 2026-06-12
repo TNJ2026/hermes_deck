@@ -187,9 +187,7 @@ extension ChatStore {
         // Dispatched through the low-level `send` (no forwarding), so this
         // follow-up is terminal and the chain stays single-hop.
         if closesLoopToSource, !replies.isEmpty {
-            let framed = replies
-                .map { "\($0.name) replied:\n\n\($0.reply)" }
-                .joined(separator: "\n\n———\n\n")
+            let framed = AgentReplyFraming.framed(replies)
             _ = await send(framed, in: sourceThreadID, profile: sourceProfile, isAgentReplyFollowUp: true)
         }
         return .routed
