@@ -455,9 +455,16 @@ struct ChatDetailView: View {
         isHoldingForUserScroll = false
     }
 
-    /// Whether this view's thread is currently streaming a reply.
+    /// Whether this view's thread is currently streaming a reply. Read from
+    /// the store (a live reference), NOT the `sendState` parameter: the
+    /// scroll-wheel monitor's closures capture the view value from onAppear,
+    /// where that stored property is frozen at its old (idle) value — which
+    /// made the 2s release conclude nothing was streaming and never resume.
     private var isStreamingReply: Bool {
-        (sendState ?? store.sendState) == .sending
+        if let threadID {
+            return store.sendState(forAgentThreadID: threadID) == .sending
+        }
+        return store.sendState == .sending
     }
 
     private func scrollToBottom(with proxy: ScrollViewProxy, animated: Bool) {
