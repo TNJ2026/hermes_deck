@@ -749,6 +749,31 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
     }
 
     @Test
+    func sourceThreadShowsBusyWhileRoutedTargetsRun() async throws {
+        // While a hand-off waits on its targets, the source thread's composer
+        // shows the sending state (both tracks) so no new prompt can sneak in.
+        let client = GatedHermesAgentClient()
+        let mainThread = ChatThread(title: "Main", profile: .defaultProfile)
+        let store = ChatStore(agentClient: client, threads: [mainThread])
+        store.availableProfiles = [
+            HermesProfile(id: "default", displayName: "Hermes agent"),
+            HermesProfile(id: "coding", displayName: "Coding"),
+        ]
+
+        async let routed: Void = store.send("@coding hi")
+        while await client.started < 1 { try await Task.sleep(for: .milliseconds(10)) }
+
+        #expect(store.sendState == .sending)
+        #expect(store.sendState(forAgentThreadID: mainThread.id) == .sending)
+
+        await client.releaseNext()
+        await routed
+
+        #expect(store.sendState == .idle)
+        #expect(store.sendState(forAgentThreadID: mainThread.id) == .idle)
+    }
+
+    @Test
     func agentReplyFramingRoundTripsAndRejectsProse() {
         let framed = AgentReplyFraming.framed([
             (name: "Coding", reply: "done"),

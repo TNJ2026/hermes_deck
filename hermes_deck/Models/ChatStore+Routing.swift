@@ -70,6 +70,17 @@ extension ChatStore {
         return AgentRoutingPrimer.text(targets: profileAliases + cliAliases)
     }
 
+    /// Marks the source thread of an in-flight hand-off as busy/idle on both
+    /// send-state tracks: the per-thread one (agent panels) and — when the
+    /// source is the selected main-chat thread — the global one its composer
+    /// watches.
+    private func setRouteWaitState(_ state: ChatSendState, for sourceThreadID: UUID) {
+        agentSendStates[sourceThreadID] = state
+        if selectedThreadID == sourceThreadID {
+            sendState = state
+        }
+    }
+
     /// Every alias the router recognizes, flattened. The Markdown renderer uses
     /// it (via the environment) to show an AgentRouting block as a forwarding
     /// card only when the block would actually route.
@@ -118,6 +129,13 @@ extension ChatStore {
         }
         historyThreadIDs.insert(sourceThreadID)
         let sourceName = source.displayName
+
+        // The source thread is busy for the whole hand-off — fan-out, waiting
+        // on the targets, and the close-the-loop follow-up. Its composer shows
+        // the sending state (Stop enabled, no new prompt) instead of silently
+        // accepting input that would queue behind the routed replies.
+        setRouteWaitState(.sending, for: sourceThreadID)
+        defer { setRouteWaitState(.idle, for: sourceThreadID) }
 
         // Fan out in parallel: each @mentioned agent gets the segment after its
         // mention, echoes its reply back into the source thread, and (for replies
