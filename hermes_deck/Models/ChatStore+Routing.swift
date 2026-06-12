@@ -42,8 +42,9 @@ extension ChatStore {
             groups.append((aliases, AgentRouteTarget(profile: profile, backend: .hermes), false))
         }
 
-        let spans = codeBlockOnly
+        let spans: [(groupIndex: Int, message: String)] = codeBlockOnly
             ? AgentMentionRouteParser.codeBlockRouteSpans(in: text, aliasGroups: groups.map(\.aliases))
+                .map { ($0.groupIndex, $0.message) }
             : AgentMentionRouteParser.routeSpans(in: text, aliasGroups: groups.map(\.aliases))
         var seenTargets = Set<String>()
         return spans.compactMap { span in
@@ -67,6 +68,20 @@ extension ChatStore {
             .filter { !$0.isEmpty && $0 != selfID }
         let cliAliases = externalAgentMentionTargets.compactMap(\.aliases.first)
         return AgentRoutingPrimer.text(targets: profileAliases + cliAliases)
+    }
+
+    /// Every alias the router recognizes, flattened. The Markdown renderer uses
+    /// it (via the environment) to show an AgentRouting block as a forwarding
+    /// card only when the block would actually route.
+    var routingMentionAliases: [String] {
+        var aliases = externalAgentMentionTargets.flatMap(\.aliases)
+        for profile in mentionableProfiles {
+            aliases.append(profile.id)
+            aliases.append(profile.displayName)
+        }
+        return aliases
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     /// Whether `text` mentions a forwardable agent (external or Hermes profile).

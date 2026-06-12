@@ -499,7 +499,7 @@ extension AgentMentionRouteParser {
     static func codeBlockRouteSpans(
         in text: String,
         aliasGroups: [[String]]
-    ) -> [(groupIndex: Int, message: String)] {
+    ) -> [(groupIndex: Int, alias: String, message: String)] {
         let candidates = mentionCandidates(for: aliasGroups)
         return fencedCodeBlockContents(in: text).compactMap { block in
             guard block.info.caseInsensitiveCompare(routingFenceInfo) == .orderedSame else { return nil }
@@ -508,9 +508,10 @@ extension AgentMentionRouteParser {
                   let match = matchMention(in: content, at: content.startIndex, candidates: candidates) else {
                 return nil
             }
+            let alias = String(content[content.index(after: content.startIndex)..<match.end])
             let message = content[match.end...].trimmingCharacters(in: .whitespacesAndNewlines)
             guard !message.isEmpty, !containsMention(message, candidates: candidates) else { return nil }
-            return (match.group, message)
+            return (match.group, alias, message)
         }
     }
 

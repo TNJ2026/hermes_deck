@@ -85,6 +85,9 @@ struct ChatDetailView: View {
                             recomputePinned()
                         }
                         .fileLinkHandler(baseDirectory: messageBaseDirectory)
+                        // Lets the renderer show AgentRouting blocks as
+                        // forwarding cards only when they would actually route.
+                        .environment(\.routingMentionAliases, store.routingMentionAliases)
                         .onAppear {
                             scrollToBottom(with: proxy, animated: false)
                         }

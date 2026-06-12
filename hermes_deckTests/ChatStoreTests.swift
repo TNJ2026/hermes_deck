@@ -688,6 +688,7 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
         """
         let spans = AgentMentionRouteParser.codeBlockRouteSpans(in: text, aliasGroups: aliasGroups)
         #expect(spans.map(\.groupIndex) == [0, 1])
+        #expect(spans.map(\.alias) == ["coding", "research"])
         #expect(spans.first?.message == "fix the crash\nin the parser")
         #expect(spans.last?.message == "verify the fix")
 

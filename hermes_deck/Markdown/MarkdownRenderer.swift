@@ -293,6 +293,7 @@ private func markdownEmphasizedFont(base: Font, emphasis: Emphasis) -> Font {
 struct MarkdownView: View {
     let source: String
     private let blocks: [MarkdownBlock]
+    @Environment(\.routingMentionAliases) private var routingMentionAliases
 
     init(_ source: String) {
         self.source = source
@@ -340,7 +341,15 @@ struct MarkdownView: View {
                 }
             }
         case .codeBlock(let language, let code):
-            MarkdownCodeBlockView(language: language, code: code)
+            // An AgentRouting block that would actually route renders as a
+            // forwarding card; anything else (unknown target, two mentions,
+            // missing @) falls back to the plain code block, so the display
+            // matches the routing behavior exactly.
+            if let routed = AgentRoutingCardView.parse(language: language, code: code, aliases: routingMentionAliases) {
+                AgentRoutingCardView(target: routed.alias, prompt: routed.message)
+            } else {
+                MarkdownCodeBlockView(language: language, code: code)
+            }
         case .thematicBreak:
             Divider()
                 .frame(maxWidth: .infinity)
@@ -1039,5 +1048,64 @@ extension View {
         environment(\.openURL, OpenURLAction { url in
             FilePathLink.reveal(url, baseDirectory: baseDirectory) ? .handled : .systemAction
         })
+    }
+}
+
+private struct RoutingMentionAliasesKey: EnvironmentKey {
+    static let defaultValue: [String] = []
+}
+
+extension EnvironmentValues {
+    /// Aliases the @mention router recognizes; injected by the chat view so
+    /// the renderer can tell a routable AgentRouting block from a dud.
+    var routingMentionAliases: [String] {
+        get { self[RoutingMentionAliasesKey.self] }
+        set { self[RoutingMentionAliasesKey.self] = newValue }
+    }
+}
+
+/// An `AgentRouting` block rendered as the forwarding action it represents —
+/// target and prompt — instead of a wall of monospaced code.
+struct AgentRoutingCardView: View {
+    let target: String
+    let prompt: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.turn.up.right")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("@\(target)")
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.blue)
+
+            Text(prompt)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.blue.opacity(0.25))
+        }
+    }
+
+    /// Mirrors the router: same fence tag, same single-target rule, matched
+    /// against the live alias list. Returns `nil` for any block the router
+    /// would not forward.
+    static func parse(language: String?, code: String, aliases: [String]) -> (alias: String, message: String)? {
+        guard !aliases.isEmpty,
+              language?.caseInsensitiveCompare(AgentMentionRouteParser.routingFenceInfo) == .orderedSame
+        else { return nil }
+        let fenced = "```\(AgentMentionRouteParser.routingFenceInfo)\n\(code)\n```"
+        let spans = AgentMentionRouteParser.codeBlockRouteSpans(in: fenced, aliasGroups: [aliases])
+        guard spans.count == 1, let span = spans.first else { return nil }
+        return (span.alias, span.message)
     }
 }
