@@ -69,30 +69,6 @@ xcodebuild test \
   -only-testing:hermes_deckTests
 ```
 
-## Packaging a `.dmg` (no Apple Developer account)
-
-An Apple Developer account is only needed to **notarize** for distribution — you can still build, ad-hoc sign, and package a `.dmg` for local use.
-
-```bash
-# 1. Release build, ad-hoc signed ("Sign to Run Locally")
-xcodebuild build \
-  -project hermes_deck.xcodeproj -scheme hermes_deck -configuration Release \
-  -derivedDataPath build -destination 'platform=macOS' \
-  CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=""
-
-# 2. Styled dmg (brew install create-dmg)
-create-dmg \
-  --volname "Hermes Deck" --window-size 600 400 --icon-size 120 \
-  --icon "Hermes Deck.app" 150 190 --app-drop-link 450 190 --no-internet-enable \
-  "Hermes Deck.dmg" "build/Build/Products/Release/Hermes Deck.app"
-```
-
-On another Mac the app is unsigned by Apple, so Gatekeeper blocks the first launch — right-click → **Open**, or:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/Hermes Deck.app"
-```
-
 ## Architecture
 
 - **UI** — SwiftUI with Swift `Observation`. `ChatStore` (`@MainActor @Observable`) is the single source of truth.

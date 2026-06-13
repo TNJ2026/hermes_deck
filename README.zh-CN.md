@@ -67,30 +67,6 @@ xcodebuild test \
   -only-testing:hermes_deckTests
 ```
 
-## 打包 `.dmg`(无需 Apple 开发者账号)
-
-Apple 开发者账号只在**公证(notarize)分发**时需要 —— 本地使用仍可构建、ad-hoc 签名并打包 `.dmg`。
-
-```bash
-# 1. Release 构建,ad-hoc 签名("Sign to Run Locally")
-xcodebuild build \
-  -project hermes_deck.xcodeproj -scheme hermes_deck -configuration Release \
-  -derivedDataPath build -destination 'platform=macOS' \
-  CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=""
-
-# 2. 美观 dmg(brew install create-dmg)
-create-dmg \
-  --volname "Hermes Deck" --window-size 600 400 --icon-size 120 \
-  --icon "Hermes Deck.app" 150 190 --app-drop-link 450 190 --no-internet-enable \
-  "Hermes Deck.dmg" "build/Build/Products/Release/Hermes Deck.app"
-```
-
-在别的 Mac 上,app 没有 Apple 签名,Gatekeeper 会拦截首次启动 —— 右键 → **打开**,或:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/Hermes Deck.app"
-```
-
 ## 架构
 
 - **UI** —— SwiftUI + Swift `Observation`。`ChatStore`(`@MainActor @Observable`)是唯一数据源。
