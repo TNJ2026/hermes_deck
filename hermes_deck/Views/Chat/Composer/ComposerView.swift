@@ -215,7 +215,8 @@ struct ComposerView: View {
                 id: target.profile.id,
                 label: target.profile.displayName,
                 subtitle: Self.backendLabel(target.backend),
-                alias: target.aliases.first ?? target.profile.id
+                alias: target.aliases.first ?? target.profile.id,
+                isUnavailable: store.isExternalAgentUnavailable(target.profile.id)
             )
         }
         return hermes + external

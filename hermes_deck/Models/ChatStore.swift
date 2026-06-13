@@ -78,6 +78,9 @@ final class ChatStore {
     /// The latest hand-off per source thread, driving the waiting/replied
     /// status cards under the triggering bubble.
     var threadHandoffs: [UUID: AgentHandoffBatch] = [:]
+    /// External CLI agent profile ids whose launcher isn't on PATH. Drives the
+    /// greyed-out state in mention autocomplete; refreshed off the main actor.
+    var unavailableExternalAgentProfileIDs: Set<String> = []
     var sessionSearchQuery = ""
 
     var selectedThread: ChatThread? {

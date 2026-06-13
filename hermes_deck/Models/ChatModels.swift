@@ -267,6 +267,9 @@ struct ExternalAgentMentionTarget: Equatable, Sendable {
     var aliases: [String]
     var profile: HermesProfile
     var backend: AgentBackend
+    /// The launcher this agent needs on PATH (`claude`, `agy`, or `npx` for the
+    /// Codex ACP adapter). Used for the pre-send availability check.
+    var probeCommand: String
 }
 
 struct AgentRouteTarget: Equatable, Sendable {

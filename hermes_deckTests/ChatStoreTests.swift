@@ -749,6 +749,26 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
     }
 
     @Test
+    func externalAgentAvailabilityProbesLauncherOnPath() async throws {
+        let store = ChatStore(agentClient: StubHermesAgentClient(reply: "ok"))
+
+        // Default: nothing probed yet → treated as available.
+        #expect(store.isExternalAgentUnavailable("agy") == false)
+
+        await store.refreshExternalAgentAvailability()
+
+        // `npx` (Codex) is on PATH in this dev environment; a missing launcher
+        // would flip its profile id into the unavailable set. We assert the
+        // mechanism, not a specific machine's install state: the set only ever
+        // contains known external profile ids.
+        let externalIDs = Set(store.externalAgentMentionTargets.map(\.profile.id))
+        #expect(store.unavailableExternalAgentProfileIDs.isSubset(of: externalIDs))
+        // A bogus command is never available; a ubiquitous one always is.
+        #expect(AgentLaunchEnvironment.isCommandAvailable("definitely-not-a-real-cmd-xyz") == false)
+        #expect(AgentLaunchEnvironment.isCommandAvailable("/bin/sh"))
+    }
+
+    @Test
     func malformedRoutingBlockReasonsDiagnoseEachFailure() {
         let aliasGroups = [["coding"], ["research"]]
         func reasons(_ text: String) -> [String] {

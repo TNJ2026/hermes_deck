@@ -124,6 +124,7 @@ struct ContentView: View {
         }
         .task {
             store.refreshHermesInstalled()
+            await store.refreshExternalAgentAvailability()
             await store.loadProfiles()
         }
         .task {

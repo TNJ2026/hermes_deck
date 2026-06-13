@@ -8,19 +8,43 @@ extension ChatStore {
             ExternalAgentMentionTarget(
                 aliases: ["codex"],
                 profile: HermesProfile(id: "acp:codex", displayName: ACPAgent.codex.displayName),
-                backend: .acp(.codex)
+                backend: .acp(.codex),
+                probeCommand: "npx"
             ),
             ExternalAgentMentionTarget(
                 aliases: ["claude", "claude-code", "claudecode"],
                 profile: HermesProfile(id: "claude-cli", displayName: "Claude Code"),
-                backend: .claudeCLI
+                backend: .claudeCLI,
+                probeCommand: "claude"
             ),
             ExternalAgentMentionTarget(
                 aliases: ["gemini", "antigravity", "agy"],
                 profile: HermesProfile(id: "agy", displayName: "Gemini"),
-                backend: .agy
+                backend: .agy,
+                probeCommand: "agy"
             ),
         ]
+    }
+
+    /// Profile ids of external CLI agents whose launcher isn't on PATH. The
+    /// mention autocomplete greys these out. Cached so the lookup doesn't run
+    /// on every keystroke; refreshed by `refreshExternalAgentAvailability()`.
+    func isExternalAgentUnavailable(_ profileID: String) -> Bool {
+        unavailableExternalAgentProfileIDs.contains(profileID)
+    }
+
+    /// Re-probes each external CLI's launcher (filesystem only, off the main
+    /// actor) and updates the cached unavailable set.
+    func refreshExternalAgentAvailability() async {
+        let targets = externalAgentMentionTargets
+        let unavailable: Set<String> = await Task.detached(priority: .utility) {
+            var result: Set<String> = []
+            for target in targets where !AgentLaunchEnvironment.isCommandAvailable(target.probeCommand) {
+                result.insert(target.profile.id)
+            }
+            return result
+        }.value
+        unavailableExternalAgentProfileIDs = unavailable
     }
 
     /// All `@mention` routes in `text`: each mentioned agent (external targets

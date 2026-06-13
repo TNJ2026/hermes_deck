@@ -106,4 +106,23 @@ enum AgentLaunchEnvironment {
             .filter { !$0.isEmpty && seen.insert($0).inserted }
             .joined(separator: ":")
     }
+
+    /// Whether `command` resolves to an executable on the same PATH the spawned
+    /// CLI agents use. A pure filesystem lookup (no process launch) — fast
+    /// enough to call while building the mention list. "Found" only means the
+    /// launcher exists; auth, npx package download, and runtime crashes still
+    /// surface later as send errors.
+    nonisolated static func isCommandAvailable(_ command: String) -> Bool {
+        // An absolute/relative path is checked directly; a bare name is searched
+        // across PATH.
+        if command.contains("/") {
+            return FileManager.default.isExecutableFile(atPath: command)
+        }
+        let fm = FileManager.default
+        return path(existing: ProcessInfo.processInfo.environment["PATH"])
+            .split(separator: ":")
+            .contains { dir in
+                fm.isExecutableFile(atPath: "\(dir)/\(command)")
+            }
+    }
 }

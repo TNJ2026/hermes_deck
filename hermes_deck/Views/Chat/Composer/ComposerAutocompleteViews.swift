@@ -5,6 +5,9 @@ struct MentionCandidate: Identifiable, Equatable {
     let label: String
     let subtitle: String
     let alias: String
+    /// External CLI whose launcher isn't on PATH — greyed out, still selectable
+    /// (it might be installed by send time; the send path reports failures).
+    var isUnavailable: Bool = false
 }
 
 /// Floating list shown above the composer when the user types `@`, listing the
@@ -24,14 +27,17 @@ struct MentionAutocompleteList: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(candidate.label)
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(candidate.isUnavailable ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
                             .lineLimit(1)
-                        Text("@\(candidate.alias) · \(candidate.subtitle)")
+                        Text(candidate.isUnavailable
+                             ? "@\(candidate.alias) · not installed"
+                             : "@\(candidate.alias) · \(candidate.subtitle)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
+                    .opacity(candidate.isUnavailable ? 0.55 : 1)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
