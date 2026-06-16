@@ -22,7 +22,7 @@ A native macOS client for the **Hermes** agent backend. Hermes Deck gives the lo
   - `@claude` — Claude via the Claude CLI
   - `@gemini` — `agy` in single-shot print mode
   - `@<profile>` / `@default` — any Hermes profile, or the main Hermes agent
-- **Agent-to-agent delegation** — An agent can hand part of a task to another agent by replying with an ` ```AgentRouting ` block (`@<target> <prompt>`). The Deck forwards it, feeds the reply back, and shows a live status card (waiting → replied, expandable) under the triggering message. Each session is auto-seeded with the convention and the current target list — no skill install needed — and malformed routing blocks get one self-correction attempt.
+- **Agent-to-agent delegation** — An agent can hand part of a task to another agent by calling the built-in `deck_delegate_agent` Hermes tool, or by falling back to an ` ```AgentRouting ` block (`@<target> <prompt>`). The Deck forwards it, feeds the reply back, and shows a live status card (waiting → replied, expandable) under the triggering message. Each session is auto-seeded with the text-block convention and the current target list, and malformed routing blocks get one self-correction attempt.
 - **Profiles** — Switch between Hermes profiles (default / coding / research / custom); the picker is hidden when only one profile exists and locked while a reply is streaming. Switching profiles mid-thread starts a fresh session rather than mixing two gateways.
 - **Sessions & history** — Browse past Hermes sessions (read from the backend SQLite database) and reopen them in chat; clickable rows in the sidebar History.
 - **Productivity panels** (right sidebar) — Kanban board, scheduled Jobs (cron), per-agent panels for Codex / Claude / Gemini, plus a Settings panel.
@@ -39,6 +39,57 @@ A native macOS client for the **Hermes** agent backend. Hermes Deck gives the lo
 - **Hermes agent backend** installed at `~/.hermes/hermes-agent` (provides the `hermes` CLI, a Python virtualenv, and the SQLite databases).
 - `sqlite3` available at `/usr/bin/sqlite3`.
 - For external agents: Node/`npx` (Codex ACP), the Claude CLI (`@claude`), and `agy` (`@gemini`) on `PATH` as needed.
+
+## Agent Delegation
+
+Hermes Deck supports two delegation paths. Prefer the tool path when available, and use the text block as the fallback.
+
+**Preferred: `deck_delegate_agent` tool**
+
+To use the `deck_delegate_agent` feature, you must first install `deck_delegate_agent` from the **Tools** page in the left Menu list and confirm it is successfully installed. After installing successfully, you must restart the Hermes Deck application to use it. You also need to restart the App after updating the Tools.
+
+Before using it, it is best to chat with the Agent to make it familiar with how to use the `deck_delegate_agent` tool and the `AgentRouting` text block.
+
+![Tools Installation](assets/tools_install.png)
+
+The tool accepts:
+
+- `target` — Deck target alias without `@`, such as `coding`, `researcher`, `codex`, `claude`, `gemini`, or another Hermes profile.
+- `prompt` — a self-contained prompt for the target agent.
+- `wait` — optional boolean. The current Deck handoff is queued asynchronously; leave this unset unless a future tool version documents synchronous waiting.
+- `dry_run` — optional boolean for install tests. It validates arguments and returns the request without calling Deck IPC.
+
+Example tool arguments:
+
+```json
+{
+  "target": "coding",
+  "prompt": "Inspect the parser change and report any regressions.",
+  "dry_run": false
+}
+```
+
+The tool only works inside a Hermes gateway/session started by the Deck desktop app. It uses `HERMES_DECK_ROUTE_HOST`, `HERMES_DECK_ROUTE_PORT`, and `HERMES_DECK_ROUTE_TOKEN` to call back into Deck. If those variables are missing, the gateway was likely started outside Deck or was not restarted after installing/updating the tool.
+
+When the call succeeds, Deck inserts a visible `AgentRouting` block into the source thread, routes the prompt, shows the delegation status card, and feeds the target reply back to the source agent.
+
+**Fallback: `AgentRouting` text block**
+
+If the tool is missing, unavailable, or returns an IPC/environment error, the agent can delegate by emitting only this block:
+
+````markdown
+```AgentRouting
+@coding
+Inspect the parser change and report any regressions.
+```
+````
+
+Rules:
+
+- Use one target per block.
+- Put the prompt on the lines after the target.
+- Keep the prompt self-contained.
+- Do not wrap the block in another code fence.
 
 ## Build & Run
 
