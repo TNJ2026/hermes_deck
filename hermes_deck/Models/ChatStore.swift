@@ -84,6 +84,16 @@ final class ChatStore {
     /// greyed-out state in mention autocomplete; refreshed off the main actor.
     var unavailableExternalAgentProfileIDs: Set<String> = []
     var sessionSearchQuery = ""
+    @ObservationIgnored var externalAgentPanelPromptSender: ((AgentBackend, UUID, String) async -> Bool)?
+    /// Who delegated into each CLI panel, so the panel's `deck-reply` can close
+    /// the loop back to them. Keyed by the panel's thread id.
+    @ObservationIgnored var panelReplyBindings: [String: PanelReplyBinding] = [:]
+    /// Pending timeout per binding; cancelled when the reply lands.
+    @ObservationIgnored var panelReplyTimeouts: [String: Task<Void, Never>] = [:]
+    /// How long to wait for a panel CLI's `deck-reply` before failing the
+    /// hand-off (an agent that ignores the convention, or exits, would otherwise
+    /// leave it waiting forever).
+    @ObservationIgnored var panelReplyTimeout: Duration = .seconds(600)
 
     var selectedThread: ChatThread? {
         get {
@@ -146,7 +156,8 @@ final class ChatStore {
         kanbanProvider: (any HermesKanbanProvider)? = nil,
         gatewayProvider: (any HermesGatewayProvider)? = nil,
         sessionPageSize: Int = 100,
-        threads: [ChatThread] = []
+        threads: [ChatThread] = [],
+        externalAgentPanelPromptSender: ((AgentBackend, UUID, String) async -> Bool)? = nil
     ) {
         // Providers are constructed here (in this @MainActor init body) rather
         // than as default arguments: the actor-backed providers are main-actor
@@ -162,6 +173,7 @@ final class ChatStore {
         self.kanbanProvider = kanbanProvider ?? LocalHermesKanbanProvider()
         self.gatewayProvider = gatewayProvider ?? LocalHermesGatewayProvider()
         self.sessionPageSize = max(1, sessionPageSize)
+        self.externalAgentPanelPromptSender = externalAgentPanelPromptSender
         self.selectedProfile = .defaultProfile
         self.availableProfiles = HermesProfile.presets
         self.threads = threads.isEmpty ? [ChatThread(title: "New Chat")] : threads
