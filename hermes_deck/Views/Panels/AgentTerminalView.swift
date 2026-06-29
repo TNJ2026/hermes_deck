@@ -229,13 +229,21 @@ private final class SessionDelegate: NSObject, LocalProcessTerminalViewDelegate 
 
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
         guard let directory else { return }
-        let owner = owner
-        DispatchQueue.main.async { owner?.handleCurrentDirectory(directory) }
+        DispatchQueue.main.async { [weak owner] in
+            // Ignore a callback from a view the session already replaced on
+            // relaunch — otherwise stale events clobber the new process's state.
+            guard let owner, owner.view === source else { return }
+            owner.handleCurrentDirectory(directory)
+        }
     }
 
     func processTerminated(source: TerminalView, exitCode: Int32?) {
-        let owner = owner
-        DispatchQueue.main.async { owner?.handleExit(exitCode) }
+        DispatchQueue.main.async { [weak owner] in
+            // A relaunch terminates the old view before swapping in the new one;
+            // its late `processTerminated` must not mark the live session exited.
+            guard let owner, owner.view === source else { return }
+            owner.handleExit(exitCode)
+        }
     }
 }
 
