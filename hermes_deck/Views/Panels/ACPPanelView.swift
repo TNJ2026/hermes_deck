@@ -152,7 +152,6 @@ struct ACPPanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: agent) {
             threadID = store.acpThread(for: agent)
-            await store.prewarmACP(agent)
         }
     }
 }
