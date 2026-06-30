@@ -37,6 +37,29 @@ enum AgentPanelMCP {
         }
     }
 
+    static func claudeConfigFileURL(sessionID: UUID) -> URL {
+        configDirectory.appendingPathComponent("claude-\(sessionID.uuidString).json")
+    }
+
+    static func cleanupClaudeConfig(sessionID: UUID) {
+        let file = claudeConfigFileURL(sessionID: sessionID)
+        try? FileManager.default.removeItem(at: file)
+    }
+
+    static func cleanupGeminiConfig() {
+        let file = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".gemini/config/mcp_config.json")
+        guard var root = (try? JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any]) else { return }
+        var servers = root["mcpServers"] as? [String: Any] ?? [:]
+        guard servers.removeValue(forKey: "deck") != nil else { return }
+        root["mcpServers"] = servers
+        if servers.isEmpty {
+            try? FileManager.default.removeItem(at: file)
+        } else {
+            try? JSONSerialization.data(withJSONObject: root, options: .prettyPrinted).write(to: file)
+        }
+    }
+
     private static func claude(url: String, token: String, sessionID: UUID) -> Launch {
         let config: [String: Any] = [
             "mcpServers": [
@@ -47,7 +70,7 @@ enum AgentPanelMCP {
                 ],
             ],
         ]
-        let file = configDirectory.appendingPathComponent("claude-\(sessionID.uuidString).json")
+        let file = claudeConfigFileURL(sessionID: sessionID)
         guard let data = try? JSONSerialization.data(withJSONObject: config),
               (try? data.write(to: file)) != nil else {
             return Launch()
@@ -83,3 +106,21 @@ enum AgentPanelMCP {
         return Launch()
     }
 }
+
+/// Minimal instruction prefixed to a delegated prompt. The `deck_reply` tool is
+/// discoverable via MCP, but a model won't call it unless told the task was
+/// delegated and the result must be returned — so one clean line (referencing
+/// the native tool, not a pasted shell command) drives the close-the-loop.
+enum DeckReplyPrimer {
+    static func wrap(_ prompt: String) -> String {
+        """
+        [Hermes Deck] A teammate delegated this task to you. When you have the \
+        final result, return it to them by calling the `deck_reply` tool with \
+        your result as the `message` argument, then stop.
+
+        Task:
+        \(prompt)
+        """
+    }
+}
+

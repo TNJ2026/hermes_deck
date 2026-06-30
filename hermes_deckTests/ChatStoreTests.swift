@@ -546,7 +546,7 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
 
         let codexThread = try #require(store.threads.first { $0.profile.id == "acp:codex" })
         #expect(panelPrompts == [
-            PanelPrompt(backend: .acp(.codex), threadID: codexThread.id, prompt: "inspect repo")
+            PanelPrompt(backend: .acp(.codex), threadID: codexThread.id, prompt: DeckReplyPrimer.wrap("inspect repo"))
         ])
         #expect(store.threadBackends[codexThread.id] == .acp(.codex))
         #expect(store.threadHandoffs[researcherThreadID]?.items.first?.phase == .waiting)
