@@ -238,7 +238,7 @@ final class DeckMCPServer: @unchecked Sendable {
         )
         Task {
             let response = await handler?(request)
-                ?? DeckMCPDelegateResponse(ok: false, status: nil, error: "Hermes Deck is not handling delegations right now.")
+                ?? DeckMCPDelegateResponse(ok: false, status: nil, error: "Hermes Deck is not handling delegations right now.", fallback: true)
             let text = response.jsonString
             self.reply(id: id, result: Self.toolResult(text, isError: !response.ok), on: connection)
         }
@@ -309,11 +309,17 @@ struct DeckMCPDelegateResponse: Sendable {
     var ok: Bool
     var status: String?
     var error: String?
+    /// True when the failure is the Deck MCP side being unavailable (handler not
+    /// wired, app shutting down) rather than a validation error — the plugin
+    /// then retries over the legacy TCP IPC. Validation failures leave this
+    /// false: IPC routes through the same path and would fail identically.
+    var fallback: Bool = false
 
     var jsonString: String {
         var payload: [String: Any] = ["ok": ok]
         if let status { payload["status"] = status }
         if let error { payload["error"] = error }
+        if fallback { payload["fallback"] = true }
         let data = (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]))
             ?? Data(#"{"ok":false,"error":"Failed to encode Deck MCP response"}"#.utf8)
         return String(decoding: data, as: UTF8.self)

@@ -33,7 +33,7 @@ extension ChatStore {
             delegateHandler: { [weak self] request in
                 await MainActor.run {
                     guard let self else {
-                        return DeckMCPDelegateResponse(ok: false, status: nil, error: "Hermes Deck is unavailable.")
+                        return DeckMCPDelegateResponse(ok: false, status: nil, error: "Hermes Deck is unavailable.", fallback: true)
                     }
                     let response = self.enqueueDelegation(
                         target: request.target,
@@ -118,11 +118,14 @@ extension ChatStore {
     @discardableResult
     func deliverPanelReply(session: String, message: String) -> Bool {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              let (bindingKey, binding) = panelReplyBinding(forReplySession: session) else { return false }
-        panelReplyBindings[bindingKey] = nil
-        panelReplyTimeouts[bindingKey]?.cancel()
-        panelReplyTimeouts[bindingKey] = nil
+        // Strict match only: the MCP bearer token maps to the same panel thread
+        // id as the binding, so an exact lookup is correct. A "single pending
+        // binding" fallback would misroute a stale reply (e.g. a timed-out
+        // Codex hand-off replying late) onto an unrelated waiting hand-off.
+        guard !trimmed.isEmpty, let binding = panelReplyBindings[session] else { return false }
+        panelReplyBindings[session] = nil
+        panelReplyTimeouts[session]?.cancel()
+        panelReplyTimeouts[session] = nil
 
         setHandoffPhase(.replied(trimmed), itemID: binding.handoffItemID, in: binding.sourceThreadID)
         Task { @MainActor [self] in
@@ -130,20 +133,6 @@ extension ChatStore {
             _ = await send(framed, in: binding.sourceThreadID, profile: binding.sourceProfile, isAgentReplyFollowUp: true)
         }
         return true
-    }
-
-    private func panelReplyBinding(forReplySession session: String) -> (key: String, binding: PanelReplyBinding)? {
-        if let binding = panelReplyBindings[session] {
-            return (session, binding)
-        }
-        // In normal operation the MCP bearer token maps to the same panel
-        // thread id used by the hand-off binding. If a panel was already running
-        // with stale MCP config, the reply can arrive under a different session
-        // key. A single pending binding is still unambiguous, so accept it
-        // instead of dropping the delegated result.
-        guard panelReplyBindings.count == 1,
-              let pair = panelReplyBindings.first else { return nil }
-        return (pair.key, pair.value)
     }
 
     /// Records who delegated into a panel so its `deck-reply` can close the loop

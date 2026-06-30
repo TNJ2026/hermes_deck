@@ -106,6 +106,15 @@ struct DeckMCPServerTests {
         #expect(delegateText?.contains("queued codex: inspect repo") == true)
     }
 
+    @Test func delegateResponseMarksFallbackOnlyWhenUnavailable() {
+        // Unavailable → fallback flag, so the plugin retries the legacy TCP IPC.
+        #expect(DeckMCPDelegateResponse(ok: false, status: nil, error: "x", fallback: true)
+            .jsonString.contains("\"fallback\":true"))
+        // Validation failure → no fallback (IPC routes the same path, same result).
+        #expect(!DeckMCPDelegateResponse(ok: false, status: nil, error: "x")
+            .jsonString.contains("fallback"))
+    }
+
     @Test func cleanupConfigDeletesFiles() throws {
         let session = UUID()
         _ = AgentPanelMCP.configure(backend: .claudeCLI, sessionID: session)

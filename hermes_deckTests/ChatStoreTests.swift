@@ -603,7 +603,7 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
     }
 
     @Test
-    func panelDeckReplyFallsBackToSinglePendingBindingWhenSessionKeyDiffers() async throws {
+    func panelDeckReplyDoesNotMisrouteWhenSessionKeyUnknown() async throws {
         let source = ChatThread(title: "Researcher", profile: HermesProfile(id: "researcher", displayName: "Researcher"))
         let store = ChatStore(agentClient: StubHermesAgentClient(reply: ""), threads: [source])
         let panelThreadID = UUID()
@@ -620,10 +620,14 @@ enum RightPanelItem: String, CaseIterable, Identifiable {
             targetName: "Codex"
         )
 
-        let message = "done despite stale token"
-        #expect(store.deliverPanelReply(session: UUID().uuidString, message: message))
-        #expect(store.threadHandoffs[source.id]?.items.first?.phase == .replied(message))
-        #expect(!store.deliverPanelReply(session: panelThreadID.uuidString, message: "second"))
+        // A reply under a session key that doesn't match the binding (e.g. a
+        // stale, already-timed-out panel replying late) must NOT be misrouted
+        // onto the single unrelated pending hand-off.
+        #expect(!store.deliverPanelReply(session: UUID().uuidString, message: "stale result"))
+        #expect(store.threadHandoffs[source.id]?.items.first?.phase == .waiting)
+        // The matching session still delivers.
+        #expect(store.deliverPanelReply(session: panelThreadID.uuidString, message: "real result"))
+        #expect(store.threadHandoffs[source.id]?.items.first?.phase == .replied("real result"))
     }
 
     @Test
