@@ -72,13 +72,28 @@ final class DeckMCPServer: @unchecked Sendable {
 
     nonisolated func environmentVariablesBlocking(waitingUpTo timeout: TimeInterval) -> [String: String] {
         guard let url = endpointURL(waitingUpTo: timeout) else { return [:] }
+        return gatewayEnvironment(url: url)
+    }
+
+    /// Async variant — waits with `Task.sleep` rather than blocking the calling
+    /// thread, so it is safe to await without freezing the main actor.
+    nonisolated func environmentVariables(waitingUpTo timeout: TimeInterval) async -> [String: String] {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            lock.lock(); let p = port; lock.unlock()
+            if let p { return gatewayEnvironment(url: "http://127.0.0.1:\(p)/mcp") }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        lock.lock(); let p = port; lock.unlock()
+        guard let p else { return [:] }
+        return gatewayEnvironment(url: "http://127.0.0.1:\(p)/mcp")
+    }
+
+    private nonisolated func gatewayEnvironment(url: String) -> [String: String] {
         lock.lock()
         let token = gatewayToken
         lock.unlock()
-        return [
-            "HERMES_DECK_MCP_URL": url,
-            "HERMES_DECK_MCP_TOKEN": token,
-        ]
+        return ["HERMES_DECK_MCP_URL": url, "HERMES_DECK_MCP_TOKEN": token]
     }
 
     // MARK: - HTTP
@@ -141,6 +156,9 @@ final class DeckMCPServer: @unchecked Sendable {
             return
         }
 
+        // A gateway agent (delegation source) and a panel CLI (reply target) get
+        // different tokens and different tools. Keep them apart: a panel token
+        // must not be able to enqueue delegations as a Hermes source.
         switch method {
         case "initialize":
             reply(id: id, result: [
@@ -149,11 +167,13 @@ final class DeckMCPServer: @unchecked Sendable {
                 "serverInfo": ["name": "hermes-deck", "version": "0.1.0"],
             ], on: connection)
         case "tools/list":
-            reply(id: id, result: ["tools": [Self.deckDelegatePromptToolSchema, Self.deckReplyToolSchema]], on: connection)
+            let tools = isGatewayToken ? [Self.deckDelegatePromptToolSchema] : [Self.deckReplyToolSchema]
+            reply(id: id, result: ["tools": tools], on: connection)
         case "tools/call":
             handleToolCall(
                 request,
                 id: id,
+                isGateway: isGatewayToken,
                 session: session ?? "",
                 replyHandler: replyHandler,
                 delegateHandler: delegateHandler,
@@ -174,6 +194,7 @@ final class DeckMCPServer: @unchecked Sendable {
     private func handleToolCall(
         _ request: [String: Any],
         id: Any?,
+        isGateway: Bool,
         session: String,
         replyHandler: ReplyHandler?,
         delegateHandler: DelegateHandler?,
@@ -183,13 +204,14 @@ final class DeckMCPServer: @unchecked Sendable {
         let name = params?["name"] as? String ?? ""
         let arguments = params?["arguments"] as? [String: Any] ?? [:]
 
-        switch name {
-        case "deck_reply":
+        // Panel tokens may only reply; gateway tokens may only delegate.
+        switch (name, isGateway) {
+        case ("deck_reply", false):
             handleDeckReply(arguments: arguments, id: id, session: session, handler: replyHandler, on: connection)
-        case "deck_delegate_prompt":
+        case ("deck_delegate_prompt", true):
             handleDeckDelegatePrompt(arguments: arguments, id: id, handler: delegateHandler, on: connection)
         default:
-            reply(id: id, error: "Unknown tool: \(name)", code: -32602, on: connection)
+            reply(id: id, error: "Tool \(name) is not available for this client", code: -32601, on: connection)
         }
     }
 
