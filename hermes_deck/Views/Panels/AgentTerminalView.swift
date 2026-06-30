@@ -250,6 +250,7 @@ final class TerminalSession: ObservableObject {
 
     func terminate() {
         view.terminate()
+        AgentPanelMCP.cleanupClaudeConfig(sessionID: id)
     }
 
     /// Injects a routed prompt into the interactive agent. Sent immediately once
@@ -273,12 +274,18 @@ final class TerminalSession: ObservableObject {
     private func write(_ text: String) {
         if view.terminal.bracketedPasteMode {
             view.send(data: EscapeSequences.bracketedPasteStart[0...])
-        }
-        view.send(txt: text)
-        if view.terminal.bracketedPasteMode {
+            view.send(txt: text)
             view.send(data: EscapeSequences.bracketedPasteEnd[0...])
+        } else {
+            view.send(txt: text)
         }
-        view.send(txt: "\r")
+        // Submit on a later turn: Ink-based TUIs (claude/codex) commit a
+        // bracketed paste asynchronously, so a CR in the same burst can land
+        // before the input is populated and get swallowed — leaving the prompt
+        // sitting unsent in the box.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak view] in
+            view?.send(txt: "\r")
+        }
     }
 
     fileprivate func handleExit(_ code: Int32?) {
@@ -378,6 +385,7 @@ final class AgentTerminalSessionStore {
     func terminateAll() {
         sessions.values.forEach { $0.terminate() }
         sessions.removeAll()
+        AgentPanelMCP.cleanupGeminiConfig()
     }
 
     func submitPrompt(

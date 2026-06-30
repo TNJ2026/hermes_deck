@@ -37,6 +37,29 @@ enum AgentPanelMCP {
         }
     }
 
+    static func claudeConfigFileURL(sessionID: UUID) -> URL {
+        configDirectory.appendingPathComponent("claude-\(sessionID.uuidString).json")
+    }
+
+    static func cleanupClaudeConfig(sessionID: UUID) {
+        let file = claudeConfigFileURL(sessionID: sessionID)
+        try? FileManager.default.removeItem(at: file)
+    }
+
+    static func cleanupGeminiConfig() {
+        let file = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".gemini/config/mcp_config.json")
+        guard var root = (try? JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any]) else { return }
+        var servers = root["mcpServers"] as? [String: Any] ?? [:]
+        guard servers.removeValue(forKey: "deck") != nil else { return }
+        root["mcpServers"] = servers
+        if servers.isEmpty {
+            try? FileManager.default.removeItem(at: file)
+        } else {
+            try? JSONSerialization.data(withJSONObject: root, options: .prettyPrinted).write(to: file)
+        }
+    }
+
     private static func claude(url: String, token: String, sessionID: UUID) -> Launch {
         let config: [String: Any] = [
             "mcpServers": [
@@ -47,12 +70,14 @@ enum AgentPanelMCP {
                 ],
             ],
         ]
-        let file = configDirectory.appendingPathComponent("claude-\(sessionID.uuidString).json")
+        let file = claudeConfigFileURL(sessionID: sessionID)
         guard let data = try? JSONSerialization.data(withJSONObject: config),
               (try? data.write(to: file)) != nil else {
             return Launch()
         }
-        return Launch(args: ["--mcp-config", file.path])
+        // The reply convention rides in the system prompt so the delegated
+        // prompt itself stays clean in the terminal.
+        return Launch(args: ["--mcp-config", file.path, "--append-system-prompt", DeckReplyPrimer.systemPrompt])
     }
 
     private static func codex(url: String, token: String) -> Launch {
@@ -83,3 +108,40 @@ enum AgentPanelMCP {
         return Launch()
     }
 }
+
+/// Instruction that drives the `deck_reply` tool call. The tool is discoverable
+/// via MCP, but a model won't call it unless told the task was delegated and the
+/// result must be returned.
+enum DeckReplyPrimer {
+    /// Whether a backend takes the convention via its system prompt at launch
+    /// (so the visible prompt stays clean) rather than a per-turn prefix.
+    static func usesSystemPrompt(_ backend: AgentBackend) -> Bool {
+        if case .claudeCLI = backend { return true }
+        return false
+    }
+
+    /// Visible, per-turn instruction for CLIs without a clean system-prompt hook
+    /// (codex / agy).
+    static func wrap(_ prompt: String) -> String {
+        """
+        [Hermes Deck] A teammate delegated this task to you. When you have the \
+        final result, return it to them by calling the `deck_reply` tool with \
+        your result as the `message` argument, then stop.
+
+        Task:
+        \(prompt)
+        """
+    }
+
+    /// System-prompt convention for CLIs that accept one at launch (claude), so
+    /// the delegated prompt itself stays clean — nothing is pasted into the
+    /// terminal. Applies for the whole session, hence the scoping caveat.
+    static let systemPrompt = """
+    You are running inside Hermes Deck, where a teammate agent may delegate a \
+    task to you. When you finish a task that was delegated to you, return the \
+    result to that teammate by calling the `deck_reply` tool with your result as \
+    the `message` argument — call it exactly once, when the delegated task is \
+    complete. Do not call `deck_reply` for the user's own direct messages.
+    """
+}
+

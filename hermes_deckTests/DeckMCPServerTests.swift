@@ -16,6 +16,8 @@ struct DeckMCPServerTests {
         // claude: a written --mcp-config file carrying the bearer header.
         let session = UUID()
         let claude = AgentPanelMCP.configure(backend: .claudeCLI, sessionID: session)
+        // The reply convention rides in the system prompt, not the visible prompt.
+        #expect(claude.args.contains("--append-system-prompt"))
         let flagIndex = try #require(claude.args.firstIndex(of: "--mcp-config"))
         let path = claude.args[claude.args.index(after: flagIndex)]
         let json = try #require(try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any])
@@ -72,4 +74,32 @@ struct DeckMCPServerTests {
         let content = ((callJSON["result"] as? [String: Any])?["content"] as? [[String: Any]])?.first
         #expect(content?["text"] as? String == "received from panel-1: hi there")
     }
+
+    @Test func cleanupConfigDeletesFiles() throws {
+        let session = UUID()
+        _ = AgentPanelMCP.configure(backend: .claudeCLI, sessionID: session)
+        let file = AgentPanelMCP.claudeConfigFileURL(sessionID: session)
+        #expect(FileManager.default.fileExists(atPath: file.path))
+
+        AgentPanelMCP.cleanupClaudeConfig(sessionID: session)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+
+        // Gemini
+        _ = AgentPanelMCP.configure(backend: .agy, sessionID: UUID())
+        let geminiFile = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".gemini/config/mcp_config.json")
+        #expect(FileManager.default.fileExists(atPath: geminiFile.path))
+        let textBefore = try String(contentsOf: geminiFile)
+        #expect(textBefore.contains("deck"))
+
+        AgentPanelMCP.cleanupGeminiConfig()
+        let fileExists = FileManager.default.fileExists(atPath: geminiFile.path)
+        if fileExists {
+            let textAfter = try String(contentsOf: geminiFile)
+            #expect(!textAfter.contains("deck"))
+        } else {
+            #expect(!fileExists)
+        }
+    }
 }
+
